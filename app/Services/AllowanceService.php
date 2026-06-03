@@ -10,11 +10,11 @@ use Illuminate\Support\Facades\DB;
 
 class AllowanceService
 {
-    public function execute(int|Allowance $allowance): array
+    public function execute(int|Allowance $allowance, bool $force = false, ?string $scheduledForOverride = null): array
     {
         $allowanceId = $allowance instanceof Allowance ? $allowance->id : $allowance;
 
-        return DB::transaction(function () use ($allowanceId) {
+        return DB::transaction(function () use ($allowanceId, $force, $scheduledForOverride) {
             $allowance = Allowance::query()
                 ->with(['parent:id,name', 'child:id,name,username'])
                 ->whereKey($allowanceId)
@@ -24,9 +24,9 @@ class AllowanceService
             $now = now();
             $today = $now->copy()->startOfDay();
             $startAt = Carbon::parse($allowance->start_at)->startOfDay();
-            $scheduledFor = Carbon::parse($allowance->next_run_at ?? $allowance->start_at)->startOfDay();
+            $scheduledFor = Carbon::parse($scheduledForOverride ?? $allowance->next_run_at ?? $allowance->start_at)->startOfDay();
 
-            if ($startAt->greaterThan($today)) {
+            if (! $force && $startAt->greaterThan($today)) {
                 return [
                     'executed' => false,
                     'message' => 'Aun no llega la fecha de inicio de esta mesada.',
@@ -34,7 +34,7 @@ class AllowanceService
                 ];
             }
 
-            if ($scheduledFor->greaterThan($today)) {
+            if (! $force && $scheduledFor->greaterThan($today)) {
                 return [
                     'executed' => false,
                     'message' => 'Esta mesada todavia no toca ejecutarse.',
