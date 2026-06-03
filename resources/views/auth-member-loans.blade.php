@@ -85,8 +85,8 @@
     <section id="loan-detail-panel" class="quick-card loan-detail-card mt-1 is-hidden">
         <div class="top-row"><p class="quick-card-title">Detalle del prestamo</p><button id="loan-detail-back" class="btn btn-inline blue-btn" type="button">Volver</button></div>
         <div class="loan-detail-grid mt-1">
-            <div><p class="loan-detail-label">Monto</p><p data-field="amount" class="loan-detail-value"></p></div>
-            <div><p class="loan-detail-label">Monto total</p><p data-field="total_amount" class="loan-detail-value"></p></div>
+            <div><p class="loan-detail-label">Prestado</p><p data-field="amount" class="loan-detail-value"></p></div>
+            <div><p class="loan-detail-label">Total a pagar</p><p data-field="total_amount" class="loan-detail-value"></p></div>
             <div><p class="loan-detail-label">Administrador</p><p data-field="parent" class="loan-detail-value"></p></div>
             <div><p class="loan-detail-label">Motivo</p><p data-field="reason" class="loan-detail-value"></p></div>
             <div><p class="loan-detail-label">Fecha limite</p><p data-field="due_date" class="loan-detail-value"></p></div>

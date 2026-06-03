@@ -12,7 +12,7 @@ class EducationController extends Controller
     {
         $courses = Course::query()
             ->where('is_active', true)
-            ->with(['lessons' => function ($q) {
+            ->with(['category:id,name,slug', 'lessons' => function ($q) {
                 $q->orderBy('position')->with(['parts' => function ($p) {
                     $p->orderBy('position');
                 }]);

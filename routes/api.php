@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AllowanceController;
 use App\Http\Controllers\Api\BalanceController;
 use App\Http\Controllers\Api\FamilyMemberController;
 use App\Http\Controllers\Api\EducationController;
@@ -22,6 +23,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/balance/add', [BalanceController::class, 'add']);
     Route::get('/family-members', [FamilyMemberController::class, 'index']);
     Route::post('/family-members', [FamilyMemberController::class, 'store']);
+    Route::get('/allowances', [AllowanceController::class, 'index']);
+    Route::post('/allowances', [AllowanceController::class, 'store']);
+    Route::post('/allowances/{allowance}/execute', [AllowanceController::class, 'execute']);
     Route::get('/loans', [LoanController::class, 'index']);
     Route::get('/loans/waiting', [LoanController::class, 'waiting']);
     Route::get('/loans/active-total', [LoanController::class, 'activeTotal']);

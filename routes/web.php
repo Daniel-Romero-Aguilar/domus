@@ -15,6 +15,7 @@ Route::view('/account/users', 'auth-account-users');
 Route::view('/account/loans', 'auth-account-loans');
 Route::view('/account/education', 'auth-account-education');
 Route::view('/parent/loans', 'auth-parent-loans');
+Route::view('/parent/allowances', 'auth-parent-allowances');
 Route::view('/member/loans', 'auth-member-loans');
 Route::view('/parent/tasks', 'auth-parent-tasks');
 Route::view('/child/tasks', 'auth-child-tasks');

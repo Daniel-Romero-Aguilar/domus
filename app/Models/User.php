@@ -5,6 +5,7 @@ namespace App\Models;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
 use App\Models\Balance;
+use App\Support\BalanceHelper;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -56,6 +57,8 @@ class User extends Authenticatable
      */
     protected $appends = [
         'profile_photo_url',
+        'balance_cents',
+        'balance_display',
     ];
 
     /**
@@ -74,5 +77,20 @@ class User extends Authenticatable
     public function balance(): HasOne
     {
         return $this->hasOne(Balance::class);
+    }
+
+    public function getBalanceCentsAttribute(): int
+    {
+        return BalanceHelper::cents($this);
+    }
+
+    public function getBalanceDisplayAttribute(): string
+    {
+        return BalanceHelper::display($this);
+    }
+
+    public function balanceCents(): int
+    {
+        return $this->balance_cents;
     }
 }

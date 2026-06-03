@@ -252,6 +252,7 @@ class LoanController extends Controller
                     'status' => 'offered',
                     'requested_by_user_id' => $parentId,
                 ]);
+                $loanAmountCents = (int) $loan->amount * 100;
 
                 $balance = Balance::query()
                     ->where('user_id', $parentId)
@@ -269,15 +270,15 @@ class LoanController extends Controller
                         ->firstOrFail();
                 }
 
-                if ((int) $balance->amount < (int) $loan->amount) {
+                if ((int) $balance->amount < $loanAmountCents) {
                     throw new \RuntimeException('INSUFFICIENT_BALANCE');
                 }
 
-                $balance->amount = (int) $balance->amount - (int) $loan->amount;
+                $balance->amount = (int) $balance->amount - $loanAmountCents;
                 $balance->save();
 
                 $balance->movements()->create([
-                    'amount_added' => (int) $loan->amount,
+                    'amount_added' => $loanAmountCents,
                     'movement_type' => 'loan_reserve',
                     'note' => 'Loan reserved while waiting for child response',
                     'resulting_balance' => $balance->amount,
@@ -358,15 +359,17 @@ class LoanController extends Controller
                         ->firstOrFail();
                 }
 
-                if ((int) $balance->amount < (int) $loan->amount) {
+                $loanAmountCents = (int) $loan->amount * 100;
+
+                if ((int) $balance->amount < $loanAmountCents) {
                     throw new \RuntimeException('INSUFFICIENT_BALANCE');
                 }
 
-                $balance->amount = (int) $balance->amount - (int) $loan->amount;
+                $balance->amount = (int) $balance->amount - $loanAmountCents;
                 $balance->save();
 
                 $balance->movements()->create([
-                    'amount_added' => (int) $loan->amount,
+                    'amount_added' => $loanAmountCents,
                     'movement_type' => 'loan_debit',
                     'note' => 'Loan approval',
                     'resulting_balance' => $balance->amount,
@@ -388,11 +391,11 @@ class LoanController extends Controller
                         ->firstOrFail();
                 }
 
-                $childBalance->amount = (int) $childBalance->amount + (int) $loan->amount;
+                $childBalance->amount = (int) $childBalance->amount + $loanAmountCents;
                 $childBalance->save();
 
                 $childBalance->movements()->create([
-                    'amount_added' => (int) $loan->amount,
+                    'amount_added' => $loanAmountCents,
                     'movement_type' => 'loan_credit',
                     'note' => 'Loan approved by parent',
                     'resulting_balance' => $childBalance->amount,
@@ -468,11 +471,13 @@ class LoanController extends Controller
                     throw new \RuntimeException('PARENT_BALANCE_NOT_RESERVED');
                 }
 
-                $childBalance->amount = (int) $childBalance->amount + (int) $loan->amount;
+                $loanAmountCents = (int) $loan->amount * 100;
+
+                $childBalance->amount = (int) $childBalance->amount + $loanAmountCents;
                 $childBalance->save();
 
                 $childBalance->movements()->create([
-                    'amount_added' => (int) $loan->amount,
+                    'amount_added' => $loanAmountCents,
                     'movement_type' => 'loan_credit',
                     'note' => 'Loan accepted by child',
                     'resulting_balance' => $childBalance->amount,
@@ -482,11 +487,13 @@ class LoanController extends Controller
                 $loan->rejection_reason = null;
             } else {
                 if ($parentBalance) {
-                    $parentBalance->amount = (int) $parentBalance->amount + (int) $loan->amount;
+                    $loanAmountCents = (int) $loan->amount * 100;
+
+                    $parentBalance->amount = (int) $parentBalance->amount + $loanAmountCents;
                     $parentBalance->save();
 
                     $parentBalance->movements()->create([
-                        'amount_added' => (int) $loan->amount,
+                        'amount_added' => $loanAmountCents,
                         'movement_type' => 'loan_refund',
                         'note' => 'Loan rejected by child',
                         'resulting_balance' => $parentBalance->amount,

@@ -18,6 +18,7 @@
                 <a class="sidebar-link" href="/account"><span class="nav-icon">•</span><span>Inicio</span></a>
                 <a class="sidebar-link" href="/account/users"><span class="nav-icon">•</span><span>Usuarios</span></a>
                 <a class="sidebar-link" href="/parent/loans"><span class="nav-icon">•</span><span>Prestamos</span></a>
+                <a class="sidebar-link" href="/parent/allowances"><span class="nav-icon">•</span><span>Mesadas</span></a>
                 <a class="sidebar-link is-active" href="/parent/tasks"><span class="nav-icon">•</span><span>Tareas</span></a>
                 <a class="sidebar-link" href="/account/education"><span class="nav-icon">•</span><span>Educacion</span></a>
             </nav>

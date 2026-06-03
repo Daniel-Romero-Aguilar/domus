@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Lesson extends Model
 {
-    protected $fillable = ['course_id', 'title', 'position'];
+    protected $fillable = ['course_id', 'name', 'title', 'slug', 'description', 'position'];
 
     public function course(): BelongsTo
     {
