@@ -13,6 +13,7 @@ Route::view('/terms', 'terms');
 Route::view('/account', 'auth-account');
 Route::view('/account/users', 'auth-account-users');
 Route::view('/account/loans', 'auth-account-loans');
+Route::view('/parent/transfers', 'auth-parent-transfers');
 Route::view('/account/education', 'auth-account-education');
 Route::view('/parent/loans', 'auth-parent-loans');
 Route::view('/parent/allowances', 'auth-parent-allowances');

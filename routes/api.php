@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AllowanceController;
 use App\Http\Controllers\Api\BalanceController;
 use App\Http\Controllers\Api\FamilyMemberController;
 use App\Http\Controllers\Api\EducationController;
+use App\Http\Controllers\Api\TransferController;
 use App\Http\Controllers\Api\LoanController;
 use App\Http\Controllers\Api\TaskController;
 use Illuminate\Http\Request;
@@ -21,6 +22,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/balance/add', [BalanceController::class, 'add']);
+    Route::get('/transfers', [TransferController::class, 'index']);
+    Route::post('/transfers', [TransferController::class, 'store']);
     Route::get('/family-members', [FamilyMemberController::class, 'index']);
     Route::post('/family-members', [FamilyMemberController::class, 'store']);
     Route::get('/allowances', [AllowanceController::class, 'index']);

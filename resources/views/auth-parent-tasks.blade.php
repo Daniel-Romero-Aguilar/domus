@@ -15,12 +15,12 @@
         <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p><p class="profile-level">Nivel 1 - Aprendiz financiero</p></section>
         <div id="sidebar-scroll" class="sidebar-scroll">
             <nav class="sidebar-nav">
-                <a class="sidebar-link" href="/account"><span class="nav-icon">•</span><span>Inicio</span></a>
-                <a class="sidebar-link" href="/account/users"><span class="nav-icon">•</span><span>Usuarios</span></a>
-                <a class="sidebar-link" href="/parent/loans"><span class="nav-icon">•</span><span>Prestamos</span></a>
-                <a class="sidebar-link" href="/parent/allowances"><span class="nav-icon">•</span><span>Mesadas</span></a>
-                <a class="sidebar-link is-active" href="/parent/tasks"><span class="nav-icon">•</span><span>Tareas</span></a>
-                <a class="sidebar-link" href="/account/education"><span class="nav-icon">•</span><span>Educacion</span></a>
+                <a class="sidebar-link" href="/account"><span class="nav-icon">&bull;</span><span>Inicio</span></a>
+                <a class="sidebar-link" href="/account/users"><span class="nav-icon">&bull;</span><span>Usuarios</span></a>
+                <a class="sidebar-link" href="/parent/loans"><span class="nav-icon">&bull;</span><span>Prestamos</span></a><a class="sidebar-link" href="/parent/transfers"><span class="nav-icon">&bull;</span><span>Dar dinero</span></a>
+                <a class="sidebar-link" href="/parent/allowances"><span class="nav-icon">&bull;</span><span>Mesadas</span></a>
+                <a class="sidebar-link is-active" href="/parent/tasks"><span class="nav-icon">&bull;</span><span>Tareas</span></a>
+                <a class="sidebar-link" href="/account/education"><span class="nav-icon">&bull;</span><span>Educacion</span></a>
             </nav>
         </div>
     </aside>

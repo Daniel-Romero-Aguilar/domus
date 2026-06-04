@@ -15,9 +15,9 @@
         <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p><p class="profile-level">Nivel 1 - Aprendiz financiero</p></section>
         <div id="sidebar-scroll" class="sidebar-scroll">
             <nav class="sidebar-nav">
-                <a class="sidebar-link" href="/account"><span class="nav-icon">•</span><span>Inicio</span></a>
-                <a class="sidebar-link is-active" href="/account/users"><span class="nav-icon">•</span><span>Usuarios</span></a>
-                <a id="loans-link" class="sidebar-link" href="/account/loans"><span class="nav-icon">•</span><span>Prestamos</span></a><a id="allowances-link" class="sidebar-link" href="/parent/allowances"><span class="nav-icon">•</span><span>Mesadas</span></a><a id="tasks-link" class="sidebar-link" href="/child/tasks"><span class="nav-icon">•</span><span>Tareas</span></a><a class="sidebar-link" href="/account/education"><span class="nav-icon">•</span><span>Educacion</span></a>
+                <a class="sidebar-link" href="/account"><span class="nav-icon">&bull;</span><span>Inicio</span></a>
+                <a class="sidebar-link is-active" href="/account/users"><span class="nav-icon">&bull;</span><span>Usuarios</span></a>
+                <a id="loans-link" class="sidebar-link" href="/account/loans"><span class="nav-icon">&bull;</span><span>Prestamos</span></a><a id="transfers-link" class="sidebar-link" href="/parent/transfers"><span class="nav-icon">&bull;</span><span>Dar dinero</span></a><a id="allowances-link" class="sidebar-link" href="/parent/allowances"><span class="nav-icon">&bull;</span><span>Mesadas</span></a><a id="tasks-link" class="sidebar-link" href="/child/tasks"><span class="nav-icon">&bull;</span><span>Tareas</span></a><a class="sidebar-link" href="/account/education"><span class="nav-icon">&bull;</span><span>Educacion</span></a>
             </nav>
             <div id="scroll-hint" class="scroll-hint">Desliza para ver mas</div>
         </div>
@@ -35,7 +35,7 @@
 
 <script>
 const API_BASE='/api',TOKEN_KEY='parent_auth_token';
-const logoutButton=document.getElementById('logout-btn'),menuButton=document.getElementById('menu-btn'),sidebar=document.getElementById('sidebar'),sidebarUserName=document.getElementById('sidebar-user-name'),sidebarClose=document.getElementById('sidebar-close'),sidebarOverlay=document.getElementById('sidebar-overlay'),sidebarScroll=document.getElementById('sidebar-scroll'),scrollHint=document.getElementById('scroll-hint'),tasksLink=document.getElementById('tasks-link'),loansLink=document.getElementById('loans-link');
+const logoutButton=document.getElementById('logout-btn'),menuButton=document.getElementById('menu-btn'),sidebar=document.getElementById('sidebar'),sidebarUserName=document.getElementById('sidebar-user-name'),sidebarClose=document.getElementById('sidebar-close'),sidebarOverlay=document.getElementById('sidebar-overlay'),sidebarScroll=document.getElementById('sidebar-scroll'),scrollHint=document.getElementById('scroll-hint'),tasksLink=document.getElementById('tasks-link'),loansLink=document.getElementById('loans-link'),transfersLink=document.getElementById('transfers-link');
 const listTab=document.getElementById('users-tab-list'),createTab=document.getElementById('users-tab-create'),listPanel=document.getElementById('users-list-panel'),createPanel=document.getElementById('users-create-panel');
 function getToken(){return localStorage.getItem(TOKEN_KEY);} function clearToken(){localStorage.removeItem(TOKEN_KEY);} function openSidebar(){sidebar.classList.add('is-open');sidebarOverlay.classList.add('is-open');} function closeSidebar(){sidebar.classList.remove('is-open');sidebarOverlay.classList.remove('is-open');}
 function updateScrollHint(){const canScroll=sidebarScroll.scrollHeight>sidebarScroll.clientHeight;const nearBottom=sidebarScroll.scrollTop+sidebarScroll.clientHeight>=sidebarScroll.scrollHeight-4;scrollHint.classList.toggle('is-visible',canScroll&&!nearBottom);} 
