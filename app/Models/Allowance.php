@@ -24,7 +24,7 @@ class Allowance extends Model
     protected $casts = [
         'amount_cents' => 'integer',
         'start_at' => 'date',
-        'next_run_at' => 'date',
+        'next_run_at' => 'datetime',
         'first_payment_immediate' => 'boolean',
         'last_executed_at' => 'datetime',
         'last_failed_at' => 'datetime',

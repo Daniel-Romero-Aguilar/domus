@@ -10,21 +10,21 @@ use Illuminate\Support\Facades\DB;
 
 class AllowanceService
 {
-    public function execute(int|Allowance $allowance, bool $force = false, ?string $scheduledForOverride = null): array
+    public function execute(int|Allowance $allowance, bool $force = false): array
     {
         $allowanceId = $allowance instanceof Allowance ? $allowance->id : $allowance;
 
-        return DB::transaction(function () use ($allowanceId, $force, $scheduledForOverride) {
+        return DB::transaction(function () use ($allowanceId, $force) {
             $allowance = Allowance::query()
                 ->with(['parent:id,name', 'child:id,name,username'])
                 ->whereKey($allowanceId)
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            $now = now();
+            $now = now()->startOfSecond();
             $today = $now->copy()->startOfDay();
             $startAt = Carbon::parse($allowance->start_at)->startOfDay();
-            $scheduledFor = Carbon::parse($scheduledForOverride ?? $allowance->next_run_at ?? $allowance->start_at)->startOfDay();
+            $scheduledFor = Carbon::parse($allowance->next_run_at ?? $allowance->start_at)->startOfSecond();
 
             if (! $force && $startAt->greaterThan($today)) {
                 return [
@@ -34,7 +34,7 @@ class AllowanceService
                 ];
             }
 
-            if (! $force && $scheduledFor->greaterThan($today)) {
+            if (! $force && $scheduledFor->greaterThan($now)) {
                 return [
                     'executed' => false,
                     'message' => 'Esta mesada todavia no toca ejecutarse.',
@@ -44,7 +44,7 @@ class AllowanceService
 
             $payment = AllowancePayment::query()
                 ->where('allowance_id', $allowance->id)
-                ->whereDate('scheduled_for', $scheduledFor->toDateString())
+                ->where('scheduled_for', $scheduledFor->toDateTimeString())
                 ->lockForUpdate()
                 ->first();
 
@@ -67,7 +67,7 @@ class AllowanceService
 
             $payment = $payment ?: new AllowancePayment([
                 'allowance_id' => $allowance->id,
-                'scheduled_for' => $scheduledFor->toDateString(),
+                'scheduled_for' => $scheduledFor->toDateTimeString(),
                 'amount_cents' => (int) $allowance->amount_cents,
             ]);
 
@@ -161,7 +161,7 @@ class AllowanceService
             $payment->save();
 
             $nextRun = $this->nextRunDate($allowance->frequency, $scheduledFor);
-            while ($nextRun->lessThanOrEqualTo($today)) {
+            while ($nextRun->lessThanOrEqualTo($now)) {
                 $nextRun = $this->nextRunDate($allowance->frequency, $nextRun);
             }
 
@@ -184,6 +184,7 @@ class AllowanceService
     public function nextRunDate(string $frequency, Carbon $from): Carbon
     {
         return match ($frequency) {
+            'ten_seconds' => $from->copy()->addSeconds(10),
             'daily' => $from->copy()->addDay(),
             'weekly' => $from->copy()->addWeek(),
             default => $from->copy()->addMonthNoOverflow(),

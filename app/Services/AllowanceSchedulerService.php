@@ -11,22 +11,18 @@ class AllowanceSchedulerService
     {
     }
 
-    public function runDueAllowances(bool $testMode = false): array
+    public function runDueAllowances(): array
     {
         // The real cadence lives on each allowance record:
-        // frequency = daily|weekly|monthly, and next_run_at is advanced after each successful payout.
+        // frequency = daily|weekly|monthly|ten_seconds, and next_run_at is advanced after each successful payout.
         // The scheduler only wakes up often enough to check which allowances are due.
-        // In test mode, we ignore next_run_at so we can verify transfers immediately.
-        $today = now()->toDateString();
+        $now = now()->startOfSecond();
         $totalAllowances = Allowance::query()->count();
         $query = Allowance::query()
             ->with(['parent:id,name', 'child:id,name,username'])
             ->where('status', '!=', 'paused')
-            ->whereDate('start_at', '<=', $today);
-
-        if (! $testMode) {
-            $query->whereDate('next_run_at', '<=', $today);
-        }
+            ->whereDate('start_at', '<=', $now->toDateString())
+            ->where('next_run_at', '<=', $now);
 
         $dueAllowances = $query->orderBy('next_run_at')->get();
 
@@ -47,14 +43,13 @@ class AllowanceSchedulerService
 
         foreach ($dueAllowances as $allowance) {
             try {
-                $result = $this->allowanceService->execute($allowance, $testMode, $testMode ? $today : null);
+                $result = $this->allowanceService->execute($allowance);
 
                 $summary['executed'] += ! empty($result['executed']) ? 1 : 0;
                 $summary['failed'] += empty($result['executed']) ? 1 : 0;
                 $summary['items'][] = [
                     'allowance_id' => $allowance->id,
                     'executed' => (bool) ($result['executed'] ?? false),
-                    'test_mode' => $testMode,
                     'message' => $result['message'] ?? null,
                 ];
             } catch (\Throwable $exception) {
@@ -62,7 +57,6 @@ class AllowanceSchedulerService
                 $summary['items'][] = [
                     'allowance_id' => $allowance->id,
                     'executed' => false,
-                    'test_mode' => $testMode,
                     'message' => $exception->getMessage(),
                 ];
 

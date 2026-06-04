@@ -43,7 +43,7 @@ class AllowanceController extends Controller
         $validated = $request->validate([
             'child_user_id' => ['required', 'integer', 'exists:users,id'],
             'amount' => ['required', 'string', 'regex:/^\d+(?:[.,]\d{1,2})?$/'],
-            'frequency' => ['required', 'in:daily,weekly,monthly'],
+            'frequency' => ['required', 'in:daily,weekly,monthly,ten_seconds'],
             'first_payment_immediate' => ['required', 'boolean'],
             'start_at' => ['required_if:first_payment_immediate,false', 'nullable', 'date'],
         ]);
@@ -63,6 +63,9 @@ class AllowanceController extends Controller
             ? Carbon::today()
             : Carbon::parse($validated['start_at'])->startOfDay();
         $amountCents = $this->moneyToCents($validated['amount']);
+        $nextRunAt = $firstImmediate
+            ? Carbon::now()->startOfSecond()
+            : $startAt->copy()->startOfDay();
 
         $allowance = Allowance::create([
             'parent_user_id' => $parent->id,
@@ -70,7 +73,7 @@ class AllowanceController extends Controller
             'amount_cents' => $amountCents,
             'frequency' => $validated['frequency'],
             'start_at' => $startAt->toDateString(),
-            'next_run_at' => $firstImmediate ? $startAt->toDateString() : $startAt->toDateString(),
+            'next_run_at' => $nextRunAt->toDateTimeString(),
             'first_payment_immediate' => $firstImmediate,
             'status' => 'pending',
         ]);
@@ -99,7 +102,7 @@ class AllowanceController extends Controller
             return response()->json(['message' => 'Allowance does not belong to your account.'], 403);
         }
 
-        $result = $this->allowanceService->execute($allowance->id);
+        $result = $this->allowanceService->execute($allowance->id, true);
 
         return response()->json($result);
     }

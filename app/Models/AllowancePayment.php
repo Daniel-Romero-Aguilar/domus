@@ -22,7 +22,7 @@ class AllowancePayment extends Model
     ];
 
     protected $casts = [
-        'scheduled_for' => 'date',
+        'scheduled_for' => 'datetime',
         'amount_cents' => 'integer',
         'parent_balance_before' => 'integer',
         'parent_balance_after' => 'integer',

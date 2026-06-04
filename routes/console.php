@@ -11,13 +11,13 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 // Production shape:
-// Schedule::call(fn (): void => app(AllowanceSchedulerService::class)->runDueAllowances(false))
+// Schedule::call(fn (): void => app(AllowanceSchedulerService::class)->runDueAllowances())
 //     ->everyMinute()
 //     ->name('domus-allowances-dispatch');
 //
-// For testing, we wake up every 10 seconds and force allowances that already started.
+// For local testing, we wake up every 10 seconds so a ten_seconds allowance behaves like the real scheduler.
 Schedule::call(function (): void {
-    $result = app(AllowanceSchedulerService::class)->runDueAllowances(true);
+    $result = app(AllowanceSchedulerService::class)->runDueAllowances();
 
     Log::info('Allowance scheduler tick', $result);
 })
