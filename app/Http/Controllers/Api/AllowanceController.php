@@ -25,7 +25,7 @@ class AllowanceController extends Controller
         }
 
         $allowances = Allowance::query()
-            ->with(['child:id,name,username', 'parent:id,name'])
+            ->with(['child:id,name,username', 'parent:id,name', 'latestPayment'])
             ->where('parent_user_id', $parent->id)
             ->latest()
             ->get();

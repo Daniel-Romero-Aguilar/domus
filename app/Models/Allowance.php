@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Allowance extends Model
@@ -43,5 +44,10 @@ class Allowance extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(AllowancePayment::class);
+    }
+
+    public function latestPayment(): HasOne
+    {
+        return $this->hasOne(AllowancePayment::class)->latestOfMany();
     }
 }

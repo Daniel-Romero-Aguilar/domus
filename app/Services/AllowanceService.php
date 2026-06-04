@@ -102,7 +102,7 @@ class AllowanceService
                 $payment->fill([
                     'status' => 'failed',
                     'failed_at' => $now,
-                    'failure_reason' => 'Saldo insuficiente',
+                    'failure_reason' => 'Fondos insuficientes',
                     'parent_balance_before' => (int) $parentBalance->amount,
                     'parent_balance_after' => (int) $parentBalance->amount,
                     'child_balance_before' => (int) $childBalance->amount,
@@ -111,13 +111,13 @@ class AllowanceService
                 ]);
                 $payment->save();
 
-                $allowance->status = 'pending';
+                $allowance->status = 'paused';
                 $allowance->last_failed_at = $now;
                 $allowance->save();
 
                 return [
                     'executed' => false,
-                    'message' => 'No tienes saldo suficiente para ejecutar esta mesada.',
+                    'message' => 'Fondos insuficientes. Se pauso la mesada. Ingresa mas dinero para reactivarla.',
                     'remaining_parent_balance' => (int) $parentBalance->amount,
                     'allowance' => $allowance->fresh(['parent:id,name', 'child:id,name,username']),
                     'payment' => $payment->fresh(),
