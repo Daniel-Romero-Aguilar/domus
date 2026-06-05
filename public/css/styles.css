@@ -4,6 +4,10 @@
   --blue-700: #113f9c;
   --gold-500: #d6a645;
   --gold-400: #e4be6a;
+  --choice-selected-bg: #fff3c4;
+  --choice-selected-border: #021b57;
+  --choice-selected-ring: rgba(2, 27, 87, 0.28);
+  --choice-selected-shadow: rgba(2, 27, 87, 0.18);
   --surface: #ffffff;
   --text: #0f172a;
   --muted: #4b5563;
@@ -547,6 +551,16 @@ h1 {
   font-weight: 600;
   color: var(--blue-900);
   background: #f8fafc;
+  box-shadow: inset 0 0 0 0 transparent;
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+
+.choice-pill.is-selected,
+.choice-pill:has(input:checked) {
+  border-color: var(--choice-selected-border);
+  background: var(--choice-selected-bg);
+  color: var(--blue-900);
+  box-shadow: inset 0 0 0 2px var(--choice-selected-border), 0 8px 18px var(--choice-selected-shadow);
 }
 
 .choice-grid {
@@ -562,14 +576,26 @@ h1 {
 
 .interest-btn.is-selected,
 .installment-btn.is-selected {
-  outline: 2px solid #e4be6a;
-  box-shadow: 0 0 0 3px rgba(228, 190, 106, 0.35), 0 10px 22px rgba(214, 166, 69, 0.35);
+  outline: 3px solid var(--choice-selected-border);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--choice-selected-ring), 0 12px 24px var(--choice-selected-shadow);
   transform: translateY(-1px);
+}
+
+.installment-btn.is-selected {
+  background: var(--gold-500);
+  color: var(--blue-900);
+}
+
+.interest-btn.is-selected {
+  background: var(--blue-900);
+  color: #fff;
 }
 
 .input-selected {
   border-color: var(--gold-500);
-  outline: 2px solid rgba(214, 166, 69, 0.25);
+  outline: 3px solid var(--choice-selected-ring);
+  box-shadow: inset 0 0 0 1px var(--choice-selected-border);
   background: #fffdf8;
 }
 

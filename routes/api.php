@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\FamilyMemberController;
 use App\Http\Controllers\Api\EducationController;
 use App\Http\Controllers\Api\TransferController;
 use App\Http\Controllers\Api\LoanController;
+use App\Http\Controllers\Api\SavingsBoxController;
 use App\Http\Controllers\Api\TaskController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -29,6 +30,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/allowances', [AllowanceController::class, 'index']);
     Route::post('/allowances', [AllowanceController::class, 'store']);
     Route::post('/allowances/{allowance}/execute', [AllowanceController::class, 'execute']);
+    Route::get('/savings-boxes', [SavingsBoxController::class, 'index']);
+    Route::post('/savings-boxes', [SavingsBoxController::class, 'store']);
     Route::get('/loans', [LoanController::class, 'index']);
     Route::get('/loans/waiting', [LoanController::class, 'waiting']);
     Route::get('/loans/active-total', [LoanController::class, 'activeTotal']);
