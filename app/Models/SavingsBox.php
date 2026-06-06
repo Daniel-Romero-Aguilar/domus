@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SavingsBox extends Model
 {
@@ -32,5 +33,10 @@ class SavingsBox extends Model
     public function members(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'savings_box_members')->withTimestamps();
+    }
+
+    public function accounts(): HasMany
+    {
+        return $this->hasMany(SavingsBoxAccount::class);
     }
 }

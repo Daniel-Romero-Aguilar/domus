@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -15,11 +15,12 @@
         <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p><p class="profile-level">Nivel 1 - Aprendiz financiero</p></section>
         <div id="sidebar-scroll" class="sidebar-scroll">
             <nav class="sidebar-nav">
-                <a class="sidebar-link" href="/account"><span class="nav-icon">•</span><span>Inicio</span></a>
-                <a class="sidebar-link" href="/account/users"><span class="nav-icon">•</span><span>Usuarios</span></a>
-                <a class="sidebar-link" href="/member/loans"><span class="nav-icon">•</span><span>Prestamos</span></a>
-                <a class="sidebar-link is-active" href="/child/tasks"><span class="nav-icon">•</span><span>Tareas</span></a>
-                <a class="sidebar-link" href="/account/education"><span class="nav-icon">•</span><span>Educacion</span></a>
+                <a class="sidebar-link" href="/account"><span class="nav-icon">â€¢</span><span>Inicio</span></a>
+                <a class="sidebar-link" href="/account/users"><span class="nav-icon">â€¢</span><span>Usuarios</span></a>
+                <a class="sidebar-link" href="/member/loans"><span class="nav-icon">â€¢</span><span>Prestamos</span></a>
+                <a class="sidebar-link" href="/child/savings-boxes"><span class="nav-icon">â€¢</span><span>Cajas de ahorro</span></a>
+                <a class="sidebar-link is-active" href="/child/tasks"><span class="nav-icon">â€¢</span><span>Tareas</span></a>
+                <a class="sidebar-link" href="/account/education"><span class="nav-icon">â€¢</span><span>Educacion</span></a>
             </nav>
             <div id="scroll-hint" class="scroll-hint">Desliza para ver mas</div>
         </div>

@@ -18,6 +18,8 @@ Route::view('/account/education', 'auth-account-education');
 Route::view('/parent/loans', 'auth-parent-loans');
 Route::view('/parent/allowances', 'auth-parent-allowances');
 Route::view('/parent/savings-boxes', 'auth-parent-savings-boxes');
+Route::view('/child/savings-boxes', 'auth-child-savings-boxes');
+Route::view('/member/savings-boxes', 'auth-child-savings-boxes');
 Route::view('/member/loans', 'auth-member-loans');
 Route::view('/parent/tasks', 'auth-parent-tasks');
 Route::view('/child/tasks', 'auth-child-tasks');

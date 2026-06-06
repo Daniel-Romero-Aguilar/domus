@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 use App\Services\AllowanceSchedulerService;
+use App\Services\SavingsBoxInterestService;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -23,3 +24,11 @@ Schedule::call(function (): void {
 })
     ->everyTenSeconds()
     ->name('domus-allowances-dispatch-test');
+
+Schedule::call(function (): void {
+    $result = app(SavingsBoxInterestService::class)->runDueSavingsBoxes();
+
+    Log::info('Savings box interest tick', $result);
+})
+    ->daily()
+    ->name('domus-savings-box-interest');
