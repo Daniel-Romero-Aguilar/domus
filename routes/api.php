@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AllowanceController;
 use App\Http\Controllers\Api\BalanceController;
+use App\Http\Controllers\Api\DomusNotificationController;
 use App\Http\Controllers\Api\FamilyMemberController;
 use App\Http\Controllers\Api\EducationController;
 use App\Http\Controllers\Api\TransferController;
@@ -22,6 +23,7 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/notifications', [DomusNotificationController::class, 'index']);
     Route::post('/balance/add', [BalanceController::class, 'add']);
     Route::get('/transfers', [TransferController::class, 'index']);
     Route::post('/transfers', [TransferController::class, 'store']);

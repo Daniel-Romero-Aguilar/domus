@@ -5,11 +5,16 @@ namespace App\Services;
 use App\Models\Allowance;
 use App\Models\AllowancePayment;
 use App\Models\Balance;
+use App\Services\DomusNotificationService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class AllowanceService
 {
+    public function __construct(private readonly DomusNotificationService $notifications)
+    {
+    }
+
     public function execute(int|Allowance $allowance, bool $force = false): array
     {
         $allowanceId = $allowance instanceof Allowance ? $allowance->id : $allowance;
@@ -49,9 +54,18 @@ class AllowanceService
                 ->first();
 
             if ($payment && $payment->status === 'paid') {
+                $nextRun = $this->nextRunDate($allowance->frequency, $scheduledFor);
+
+                $allowance->status = 'active';
+                $allowance->last_executed_at = $payment->executed_at ?? $allowance->last_executed_at;
+                $allowance->last_failed_at = null;
+                $allowance->next_run_at = $nextRun;
+                $allowance->save();
+
                 return [
                     'executed' => true,
                     'already_executed' => true,
+                    'advanced_schedule' => true,
                     'message' => 'Esta mesada ya fue ejecutada para esa fecha.',
                     'allowance' => $allowance->fresh(['parent:id,name', 'child:id,name,username']),
                     'payment' => $payment,
@@ -115,6 +129,14 @@ class AllowanceService
                 $allowance->last_failed_at = $now;
                 $allowance->save();
 
+                $childName = $allowance->child?->name ?? 'un integrante';
+                $this->notifications->recordForParent(
+                    $allowance->parent_user_id,
+                    'fallo',
+                    'mesadas',
+                    'Tu mesada para '.$childName.' se pauso por fondos insuficientes.'
+                );
+
                 return [
                     'executed' => false,
                     'message' => 'Fondos insuficientes. Se pauso la mesada. Ingresa mas dinero para reactivarla.',
@@ -160,16 +182,28 @@ class AllowanceService
             ]);
             $payment->save();
 
-            $nextRun = $this->nextRunDate($allowance->frequency, $scheduledFor);
-            while ($nextRun->lessThanOrEqualTo($now)) {
-                $nextRun = $this->nextRunDate($allowance->frequency, $nextRun);
-            }
-
             $allowance->status = 'active';
             $allowance->last_executed_at = $now;
             $allowance->last_failed_at = null;
-            $allowance->next_run_at = $nextRun;
+            $allowance->next_run_at = $this->nextRunDate($allowance->frequency, $scheduledFor);
             $allowance->save();
+
+            $amountText = $this->notifications->money($amountCents);
+            $childName = $allowance->child?->name ?? 'un integrante';
+            $parentName = $allowance->parent?->name ?? 'tu familia';
+
+            $this->notifications->recordForParent(
+                $allowance->parent_user_id,
+                'pago',
+                'mesadas',
+                'Pagaste una mesada de '.$amountText.' a '.$childName.'.'
+            );
+            $this->notifications->recordForMember(
+                $allowance->child_user_id,
+                'pago',
+                'mesadas',
+                'Recibiste una mesada de '.$amountText.' de '.$parentName.'.'
+            );
 
             return [
                 'executed' => true,
@@ -179,6 +213,48 @@ class AllowanceService
                 'payment' => $payment->fresh(),
             ];
         });
+    }
+
+    public function duePaymentPreview(Allowance $allowance, ?Carbon $asOf = null, int $cap = 1000): array
+    {
+        $now = ($asOf ?: now())->copy()->startOfSecond();
+
+        if (! $allowance->next_run_at) {
+            return ['count' => 0, 'capped' => false];
+        }
+
+        $startAt = Carbon::parse($allowance->start_at)->startOfDay();
+        if ($startAt->greaterThan($now->copy()->startOfDay())) {
+            return ['count' => 0, 'capped' => false];
+        }
+
+        $scheduledFor = Carbon::parse($allowance->next_run_at)->startOfSecond();
+        if ($scheduledFor->greaterThan($now)) {
+            return ['count' => 0, 'capped' => false];
+        }
+
+        if ($allowance->frequency === 'ten_seconds') {
+            $secondsLate = max(0, $now->getTimestamp() - $scheduledFor->getTimestamp());
+            $count = intdiv($secondsLate, 10) + 1;
+
+            return [
+                'count' => min($count, $cap),
+                'capped' => $count > $cap,
+            ];
+        }
+
+        $count = 0;
+        $cursor = $scheduledFor->copy();
+
+        while ($cursor->lessThanOrEqualTo($now) && $count < $cap) {
+            $count++;
+            $cursor = $this->nextRunDate($allowance->frequency, $cursor);
+        }
+
+        return [
+            'count' => $count,
+            'capped' => $cursor->lessThanOrEqualTo($now),
+        ];
     }
 
     public function nextRunDate(string $frequency, Carbon $from): Carbon

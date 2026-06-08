@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Balance;
+use App\Services\DomusNotificationService;
 use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -12,6 +13,10 @@ use Illuminate\Support\Facades\DB;
 
 class BalanceController extends Controller
 {
+    public function __construct(private readonly DomusNotificationService $notifications)
+    {
+    }
+
     public function add(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -44,6 +49,13 @@ class BalanceController extends Controller
                 'note' => 'Balance top-up',
                 'resulting_balance' => $balance->amount,
             ]);
+
+            $this->notifications->record(
+                $user->id,
+                'saldo',
+                'balance',
+                'Agregaste '.$this->notifications->money($amountCents).' a tu saldo.'
+            );
 
             return [
                 'balance' => $balance->amount,

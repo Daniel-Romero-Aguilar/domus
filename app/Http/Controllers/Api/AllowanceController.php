@@ -6,14 +6,19 @@ use App\Http\Controllers\Controller;
 use App\Models\Allowance;
 use App\Models\FamilyMember;
 use App\Services\AllowanceService;
+use App\Services\DomusNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class AllowanceController extends Controller
 {
-    public function __construct(private readonly AllowanceService $allowanceService)
+    public function __construct(
+        private readonly AllowanceService $allowanceService,
+        private readonly DomusNotificationService $notifications
+    )
     {
     }
 
@@ -30,7 +35,42 @@ class AllowanceController extends Controller
             ->latest()
             ->get();
 
-        return response()->json(['allowances' => $allowances]);
+        $now = Carbon::now()->startOfSecond();
+        $summary = [
+            'pending_due_payments' => 0,
+            'pending_due_payments_capped' => false,
+            'allowances_with_pending_due_payments' => 0,
+            'paused_due_allowances' => 0,
+        ];
+
+        $allowances->each(function (Allowance $allowance) use ($now, &$summary): void {
+            $preview = $this->allowanceService->duePaymentPreview($allowance, $now);
+            $dueCount = (int) $preview['count'];
+            $isPaused = $allowance->status === 'paused';
+
+            $allowance->setAttribute('due_payments_count', $dueCount);
+            $allowance->setAttribute('due_payments_count_capped', (bool) $preview['capped']);
+            $allowance->setAttribute('has_due_payments', $dueCount > 0);
+
+            if ($dueCount < 1) {
+                return;
+            }
+
+            if ($isPaused) {
+                $summary['paused_due_allowances']++;
+
+                return;
+            }
+
+            $summary['pending_due_payments'] += $dueCount;
+            $summary['pending_due_payments_capped'] = $summary['pending_due_payments_capped'] || (bool) $preview['capped'];
+            $summary['allowances_with_pending_due_payments']++;
+        });
+
+        return response()->json([
+            'allowances' => $allowances,
+            'summary' => $summary,
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -67,16 +107,36 @@ class AllowanceController extends Controller
             ? Carbon::now()->startOfSecond()
             : $startAt->copy()->startOfDay();
 
-        $allowance = Allowance::create([
-            'parent_user_id' => $parent->id,
-            'child_user_id' => $childId,
-            'amount_cents' => $amountCents,
-            'frequency' => $validated['frequency'],
-            'start_at' => $startAt->toDateString(),
-            'next_run_at' => $nextRunAt->toDateTimeString(),
-            'first_payment_immediate' => $firstImmediate,
-            'status' => 'pending',
-        ]);
+        $allowance = DB::transaction(function () use ($parent, $childId, $amountCents, $validated, $startAt, $nextRunAt, $firstImmediate): Allowance {
+            $allowance = Allowance::create([
+                'parent_user_id' => $parent->id,
+                'child_user_id' => $childId,
+                'amount_cents' => $amountCents,
+                'frequency' => $validated['frequency'],
+                'start_at' => $startAt->toDateString(),
+                'next_run_at' => $nextRunAt->toDateTimeString(),
+                'first_payment_immediate' => $firstImmediate,
+                'status' => 'pending',
+            ])->load('child:id,name,username');
+
+            $amountText = $this->notifications->money($amountCents);
+            $childName = $allowance->child?->name ?? 'un integrante';
+
+            $this->notifications->recordForParent(
+                $parent->id,
+                'creacion',
+                'mesadas',
+                'Creaste una mesada de '.$amountText.' para '.$childName.'.'
+            );
+            $this->notifications->recordForMember(
+                $childId,
+                'creacion',
+                'mesadas',
+                'Te configuraron una mesada de '.$amountText.'.'
+            );
+
+            return $allowance;
+        });
 
         $result = null;
         if ($firstImmediate) {

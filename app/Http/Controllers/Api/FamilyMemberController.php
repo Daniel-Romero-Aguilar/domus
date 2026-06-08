@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Balance;
 use App\Models\FamilyMember;
 use App\Models\User;
+use App\Services\DomusNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,10 @@ use Illuminate\Support\Facades\Hash;
 
 class FamilyMemberController extends Controller
 {
+    public function __construct(private readonly DomusNotificationService $notifications)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $parent = $request->user();
@@ -90,12 +95,27 @@ class FamilyMemberController extends Controller
                 'amount' => 0,
             ]);
 
-            return FamilyMember::create([
+            $member = FamilyMember::create([
                 'parent_user_id' => $parent->id,
                 'user_id' => $childUser->id,
                 'is_minor' => $isMinor,
                 'guardian_declaration_accepted' => $guardianDeclarationAccepted,
             ])->load('user:id,name,username,role');
+
+            $this->notifications->recordForParent(
+                $parent->id,
+                'integrantes',
+                'usuarios',
+                'Creaste el integrante '.$childUser->name.' (@'.$childUser->username.').'
+            );
+            $this->notifications->recordForMember(
+                $childUser->id,
+                'creacion',
+                'usuarios',
+                'Tu cuenta familiar fue creada.'
+            );
+
+            return $member;
         });
 
         return response()->json([

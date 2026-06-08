@@ -5,11 +5,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\FamilyMember;
 use App\Models\Task;
+use App\Services\DomusNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class TaskController extends Controller
 {
+    public function __construct(private readonly DomusNotificationService $notifications)
+    {
+    }
+
     public function parentIndex(Request $request): JsonResponse
     {
         $parent = $request->user();
@@ -45,14 +51,25 @@ class TaskController extends Controller
             'reward_points' => ['required', 'integer', 'min:0'],
         ]);
 
-        $task = Task::create([
-            'parent_user_id' => $parent->id,
-            'name' => $validated['name'],
-            'description' => $validated['description'] ?? null,
-            'reward_amount' => (int) $validated['reward_amount'],
-            'reward_points' => (int) $validated['reward_points'],
-            'status' => 'open',
-        ]);
+        $task = DB::transaction(function () use ($parent, $validated): Task {
+            $task = Task::create([
+                'parent_user_id' => $parent->id,
+                'name' => $validated['name'],
+                'description' => $validated['description'] ?? null,
+                'reward_amount' => (int) $validated['reward_amount'],
+                'reward_points' => (int) $validated['reward_points'],
+                'status' => 'open',
+            ]);
+
+            $this->notifications->recordForParent(
+                $parent->id,
+                'creacion',
+                'tareas',
+                'Creaste la tarea '.$task->name.'.'
+            );
+
+            return $task;
+        });
 
         return response()->json([
             'message' => 'Task created.',
@@ -143,10 +160,27 @@ class TaskController extends Controller
             return response()->json(['message' => 'Task is not open for acceptance.'], 422);
         }
 
-        $task->accepted_by_user_id = $child->id;
-        $task->member_completion_requested_at = null;
-        $task->status = 'accepted';
-        $task->save();
+        $task = DB::transaction(function () use ($child, $task): Task {
+            $task->accepted_by_user_id = $child->id;
+            $task->member_completion_requested_at = null;
+            $task->status = 'accepted';
+            $task->save();
+
+            $this->notifications->recordForMember(
+                $child->id,
+                'aceptacion',
+                'tareas',
+                'Aceptaste la tarea '.$task->name.'.'
+            );
+            $this->notifications->recordForParent(
+                $task->parent_user_id,
+                'aceptacion',
+                'tareas',
+                $child->name.' acepto la tarea '.$task->name.'.'
+            );
+
+            return $task;
+        });
 
         return response()->json([
             'message' => 'Task accepted.',
@@ -184,9 +218,26 @@ class TaskController extends Controller
             return response()->json(['message' => 'Task cannot be marked as completed in the current status.'], 422);
         }
 
-        $task->status = 'awaiting_parent_confirmation';
-        $task->member_completion_requested_at = now();
-        $task->save();
+        $task = DB::transaction(function () use ($child, $task): Task {
+            $task->status = 'awaiting_parent_confirmation';
+            $task->member_completion_requested_at = now();
+            $task->save();
+
+            $this->notifications->recordForMember(
+                $child->id,
+                'completada',
+                'tareas',
+                'Marcaste como completada la tarea '.$task->name.'.'
+            );
+            $this->notifications->recordForParent(
+                $task->parent_user_id,
+                'revision',
+                'tareas',
+                $child->name.' pidio revision de la tarea '.$task->name.'.'
+            );
+
+            return $task;
+        });
 
         return response()->json([
             'message' => 'Completion request sent to parent/admin.',

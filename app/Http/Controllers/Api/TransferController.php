@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Balance;
 use App\Models\FamilyMember;
 use App\Models\FamilyTransfer;
+use App\Services\DomusNotificationService;
 use App\Support\BalanceHelper;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -14,6 +15,10 @@ use Illuminate\Support\Facades\DB;
 
 class TransferController extends Controller
 {
+    public function __construct(private readonly DomusNotificationService $notifications)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $parent = $request->user();
@@ -174,7 +179,25 @@ class TransferController extends Controller
                 ]);
                 $transfer->save();
 
-                return $this->formatTransferResponse($transfer->fresh(['parent:id,name', 'child:id,name,username']), false);
+                $completedTransfer = $transfer->fresh(['parent:id,name', 'child:id,name,username']);
+                $amountText = $this->notifications->money($amountCents);
+                $childName = $completedTransfer->child?->name ?? 'un integrante';
+                $parentName = $completedTransfer->parent?->name ?? 'tu familia';
+
+                $this->notifications->recordForParent(
+                    $parent->id,
+                    'envio',
+                    'dar_dinero',
+                    'Enviaste '.$amountText.' a '.$childName.'.'
+                );
+                $this->notifications->recordForMember(
+                    $childId,
+                    'recepcion',
+                    'dar_dinero',
+                    'Recibiste '.$amountText.' de '.$parentName.'.'
+                );
+
+                return $this->formatTransferResponse($completedTransfer, false);
             });
         } catch (QueryException $exception) {
             if ((string) ($exception->getCode() ?? '') !== '23000') {

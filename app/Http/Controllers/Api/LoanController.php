@@ -7,6 +7,7 @@ use App\Models\Balance;
 use App\Models\BalanceMovement;
 use App\Models\FamilyMember;
 use App\Models\Loan;
+use App\Services\DomusNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +16,10 @@ use Illuminate\Support\Carbon;
 
 class LoanController extends Controller
 {
+    public function __construct(private readonly DomusNotificationService $notifications)
+    {
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -101,19 +106,19 @@ class LoanController extends Controller
             ->whereIn('status', ['approved', 'paid'])
             ->get();
 
-        $estimatedPaidTotal = 0;
+        $estimatedPaidTotalCents = 0;
 
         foreach ($loans as $loan) {
             $totalAmount = (int) $loan->total_amount;
             $installmentsCount = max(1, (int) $loan->installments_count);
 
             if ($installmentsCount === 1) {
-                $estimatedPaidTotal += $loan->status === 'paid' ? $totalAmount : 0;
+                $estimatedPaidTotalCents += $loan->status === 'paid' ? $totalAmount * 100 : 0;
                 continue;
             }
 
             if ($loan->status === 'paid') {
-                $estimatedPaidTotal += $totalAmount;
+                $estimatedPaidTotalCents += $totalAmount * 100;
                 continue;
             }
 
@@ -131,17 +136,16 @@ class LoanController extends Controller
             };
 
             $paidInstallments = min($installmentsCount, max(0, $elapsedInstallments));
-            $estimatedPaid = min($totalAmount, $paidInstallments * (int) $loan->installment_amount);
-            $estimatedPaidTotal += $estimatedPaid;
+            $estimatedPaidTotalCents += $loan->estimatedPaidCentsForInstallments($paidInstallments);
         }
 
         return response()->json([
             'total_active_loans' => $loans->count(),
-            'estimated_total_paid' => $estimatedPaidTotal,
+            'estimated_total_paid' => $estimatedPaidTotalCents / 100,
             'currency' => 'MXN',
             'meta' => [
                 'is_estimated' => true,
-                'estimation_note' => 'Deferred loans are estimated by elapsed installments because no payment ledger exists yet.',
+                'estimation_note' => 'Deferred loans are estimated by elapsed installments with exact cent distribution because no payment ledger exists yet.',
             ],
         ]);
     }
@@ -230,12 +234,30 @@ class LoanController extends Controller
         ];
 
         if (in_array($actor->role, ['child', 'member'], true)) {
-            $loan = Loan::create([
-                'parent_user_id' => $parentId,
-                ...$loanData,
-                'status' => 'pending',
-                'requested_by_user_id' => $actor->id,
-            ])->load('child:id,name,username');
+            $loan = DB::transaction(function () use ($actor, $parentId, $loanData): Loan {
+                $loan = Loan::create([
+                    'parent_user_id' => $parentId,
+                    ...$loanData,
+                    'status' => 'pending',
+                    'requested_by_user_id' => $actor->id,
+                ])->load('child:id,name,username');
+
+                $amountText = $this->notifications->money((int) $loan->amount * 100);
+                $this->notifications->recordForMember(
+                    $actor->id,
+                    'solicitud',
+                    'prestamos',
+                    'Solicitaste un prestamo por '.$amountText.'.'
+                );
+                $this->notifications->recordForParent(
+                    $parentId,
+                    'solicitud',
+                    'prestamos',
+                    $actor->name.' solicito un prestamo por '.$amountText.'.'
+                );
+
+                return $loan;
+            });
 
             return response()->json([
                 'message' => 'Loan request submitted and pending approval.',
@@ -284,8 +306,25 @@ class LoanController extends Controller
                     'resulting_balance' => $balance->amount,
                 ]);
 
+                $loan = $loan->fresh(['child:id,name,username']);
+                $amountText = $this->notifications->money((int) $loan->amount * 100);
+                $childName = $loan->child?->name ?? 'un integrante';
+
+                $this->notifications->recordForParent(
+                    $parentId,
+                    'oferta',
+                    'prestamos',
+                    'Ofreciste un prestamo por '.$amountText.' a '.$childName.'.'
+                );
+                $this->notifications->recordForMember(
+                    $loan->child_user_id,
+                    'oferta',
+                    'prestamos',
+                    'Recibiste una oferta de prestamo por '.$amountText.'.'
+                );
+
                 return [
-                    'loan' => $loan->fresh(['child:id,name,username']),
+                    'loan' => $loan,
                     'remaining_balance' => (int) $balance->amount,
                 ];
                 });
@@ -406,8 +445,25 @@ class LoanController extends Controller
                 $loan->responded_at = now();
                 $loan->save();
 
+                $loan = $loan->fresh(['child:id,name,username']);
+                $amountText = $this->notifications->money((int) $loan->amount * 100);
+                $childName = $loan->child?->name ?? 'un integrante';
+
+                $this->notifications->recordForParent(
+                    $parent->id,
+                    'aprobacion',
+                    'prestamos',
+                    'Aprobaste un prestamo por '.$amountText.' para '.$childName.'.'
+                );
+                $this->notifications->recordForMember(
+                    $loan->child_user_id,
+                    'aprobacion',
+                    'prestamos',
+                    'Tu prestamo por '.$amountText.' fue aprobado.'
+                );
+
                 return [
-                    'loan' => $loan->fresh(['child:id,name,username']),
+                    'loan' => $loan,
                     'remaining_balance' => (int) $balance->amount,
                 ];
             });
@@ -507,7 +563,38 @@ class LoanController extends Controller
             $loan->responded_at = now();
             $loan->save();
 
-            return $loan->fresh(['parent:id,name,email', 'child:id,name,username']);
+            $loan = $loan->fresh(['parent:id,name,email', 'child:id,name,username']);
+            $amountText = $this->notifications->money((int) $loan->amount * 100);
+
+            if ($validated['action'] === 'accept') {
+                $this->notifications->recordForMember(
+                    $child->id,
+                    'aceptacion',
+                    'prestamos',
+                    'Aceptaste un prestamo por '.$amountText.'.'
+                );
+                $this->notifications->recordForParent(
+                    $loan->parent_user_id,
+                    'aceptacion',
+                    'prestamos',
+                    $child->name.' acepto un prestamo por '.$amountText.'.'
+                );
+            } else {
+                $this->notifications->recordForMember(
+                    $child->id,
+                    'rechazo',
+                    'prestamos',
+                    'Rechazaste un prestamo por '.$amountText.'.'
+                );
+                $this->notifications->recordForParent(
+                    $loan->parent_user_id,
+                    'rechazo',
+                    'prestamos',
+                    $child->name.' rechazo un prestamo por '.$amountText.'.'
+                );
+            }
+
+            return $loan;
         });
 
         return response()->json([

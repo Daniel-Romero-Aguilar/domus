@@ -7,6 +7,7 @@ use App\Models\Balance;
 use App\Models\FamilyMember;
 use App\Models\SavingsBox;
 use App\Models\SavingsBoxAccount;
+use App\Services\DomusNotificationService;
 use App\Services\SavingsBoxInterestService;
 use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
@@ -17,7 +18,10 @@ use Illuminate\Support\Facades\DB;
 
 class SavingsBoxController extends Controller
 {
-    public function __construct(private readonly SavingsBoxInterestService $interestService)
+    public function __construct(
+        private readonly SavingsBoxInterestService $interestService,
+        private readonly DomusNotificationService $notifications
+    )
     {
     }
 
@@ -130,7 +134,21 @@ class SavingsBoxController extends Controller
                     'last_interest_accrued_on' => now()->toDateString(),
                     'interest_accrued_until_at' => now(),
                 ]);
+
+                $this->notifications->recordForMember(
+                    (int) $memberId,
+                    'creacion',
+                    'cajas_ahorro',
+                    'Te habilitaron la caja de ahorro '.$box->name.'.'
+                );
             }
+
+            $this->notifications->recordForParent(
+                $parent->id,
+                'creacion',
+                'cajas_ahorro',
+                'Creaste la caja de ahorro '.$box->name.' para '.$enabledMemberIds->count().' integrante(s).'
+            );
 
             return $box;
         });
@@ -227,6 +245,20 @@ class SavingsBoxController extends Controller
                 $earnedBefore,
                 $now,
                 'Savings box deposit'
+            );
+
+            $amountText = $this->notifications->money($amountCents);
+            $this->notifications->recordForMember(
+                $user->id,
+                'abono',
+                'cajas_ahorro',
+                'Abonaste '.$amountText.' a la caja '.$savingsBox->name.'.'
+            );
+            $this->notifications->recordForParent(
+                $savingsBox->parent_user_id,
+                'abono',
+                'cajas_ahorro',
+                $user->name.' abono '.$amountText.' a la caja '.$savingsBox->name.'.'
             );
 
             return [
@@ -327,6 +359,20 @@ class SavingsBoxController extends Controller
                 $earnedBefore,
                 $now,
                 'Savings box early withdrawal'
+            );
+
+            $amountText = $this->notifications->money($amountCents);
+            $this->notifications->recordForMember(
+                $user->id,
+                'retiro',
+                'cajas_ahorro',
+                'Retiraste '.$amountText.' de la caja '.$savingsBox->name.'.'
+            );
+            $this->notifications->recordForParent(
+                $savingsBox->parent_user_id,
+                'retiro',
+                'cajas_ahorro',
+                $user->name.' retiro '.$amountText.' de la caja '.$savingsBox->name.'.'
             );
 
             return [
