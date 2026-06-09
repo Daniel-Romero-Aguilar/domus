@@ -7,7 +7,9 @@ use App\Models\Balance;
 use App\Models\BalanceMovement;
 use App\Models\FamilyMember;
 use App\Models\Loan;
+use App\Models\LoanPayment;
 use App\Services\DomusNotificationService;
+use App\Services\LoanPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +18,10 @@ use Illuminate\Support\Carbon;
 
 class LoanController extends Controller
 {
-    public function __construct(private readonly DomusNotificationService $notifications)
+    public function __construct(
+        private readonly DomusNotificationService $notifications,
+        private readonly LoanPaymentService $loanPayments,
+    )
     {
     }
 
@@ -41,19 +46,28 @@ class LoanController extends Controller
 
         if ($user->role === 'parent') {
             $loans = Loan::query()
-                ->with('child:id,name,username')
+                ->with(['child:id,name,username'])
                 ->where('parent_user_id', $user->id)
                 ->latest()
                 ->get();
         } else {
             $loans = Loan::query()
-                ->with('parent:id,name,email')
+                ->with(['parent:id,name,email'])
                 ->where('child_user_id', $user->id)
                 ->latest()
                 ->get();
         }
 
-        return response()->json(['loans' => $loans]);
+        $this->loanPayments->syncStatusesForLoans($loans);
+        $loans->load(['payments' => fn ($query) => $query->orderBy('installment_number')]);
+
+        foreach ($loans as $loan) {
+            $this->loanPayments->refreshLoanStatus($loan);
+        }
+
+        return response()->json([
+            'loans' => $loans->map(fn (Loan $loan) => $this->presentLoan($loan))->values(),
+        ]);
     }
 
     public function waiting(Request $request): JsonResponse
@@ -87,7 +101,12 @@ class LoanController extends Controller
             ->latest()
             ->get();
 
-        return response()->json(['loans' => $loans]);
+        $this->loanPayments->syncStatusesForLoans($loans);
+        $loans->load(['payments' => fn ($query) => $query->orderBy('installment_number')]);
+
+        return response()->json([
+            'loans' => $loans->map(fn (Loan $loan) => $this->presentLoan($loan))->values(),
+        ]);
     }
 
     public function activeTotal(Request $request): JsonResponse
@@ -102,50 +121,26 @@ class LoanController extends Controller
         }
 
         $loans = Loan::query()
+            ->with(['payments' => fn ($query) => $query->orderBy('installment_number')])
             ->where('parent_user_id', $parent->id)
             ->whereIn('status', ['approved', 'paid'])
             ->get();
 
-        $estimatedPaidTotalCents = 0;
+        $this->loanPayments->syncStatusesForLoans($loans);
+        $paidTotalCents = 0;
 
         foreach ($loans as $loan) {
-            $totalAmount = (int) $loan->total_amount;
-            $installmentsCount = max(1, (int) $loan->installments_count);
-
-            if ($installmentsCount === 1) {
-                $estimatedPaidTotalCents += $loan->status === 'paid' ? $totalAmount * 100 : 0;
-                continue;
-            }
-
-            if ($loan->status === 'paid') {
-                $estimatedPaidTotalCents += $totalAmount * 100;
-                continue;
-            }
-
-            $startDate = $loan->responded_at ? Carbon::parse($loan->responded_at) : $loan->created_at;
-            $now = now();
-
-            if ($startDate->greaterThan($now)) {
-                continue;
-            }
-
-            $elapsedInstallments = match ($loan->installment_frequency) {
-                'weekly' => intdiv($startDate->diffInDays($now), 7),
-                'biweekly' => intdiv($startDate->diffInDays($now), 14),
-                default => $startDate->diffInMonths($now),
-            };
-
-            $paidInstallments = min($installmentsCount, max(0, $elapsedInstallments));
-            $estimatedPaidTotalCents += $loan->estimatedPaidCentsForInstallments($paidInstallments);
+            $summary = $this->loanPayments->buildSummary($loan);
+            $paidTotalCents += (int) $summary['paid_total_cents'];
         }
 
         return response()->json([
             'total_active_loans' => $loans->count(),
-            'estimated_total_paid' => $estimatedPaidTotalCents / 100,
+            'estimated_total_paid' => $paidTotalCents / 100,
             'currency' => 'MXN',
             'meta' => [
-                'is_estimated' => true,
-                'estimation_note' => 'Deferred loans are estimated by elapsed installments with exact cent distribution because no payment ledger exists yet.',
+                'is_estimated' => false,
+                'estimation_note' => 'The total now comes from the actual payment ledger.',
             ],
         ]);
     }
@@ -241,6 +236,7 @@ class LoanController extends Controller
                     'status' => 'pending',
                     'requested_by_user_id' => $actor->id,
                 ])->load('child:id,name,username');
+                $this->loanPayments->ensurePaymentsForLoan($loan);
 
                 $amountText = $this->notifications->money((int) $loan->amount * 100);
                 $this->notifications->recordForMember(
@@ -274,6 +270,7 @@ class LoanController extends Controller
                     'status' => 'offered',
                     'requested_by_user_id' => $parentId,
                 ]);
+                $this->loanPayments->ensurePaymentsForLoan($loan);
                 $loanAmountCents = (int) $loan->amount * 100;
 
                 $balance = Balance::query()
@@ -444,6 +441,8 @@ class LoanController extends Controller
                 $loan->rejection_reason = null;
                 $loan->responded_at = now();
                 $loan->save();
+                $this->loanPayments->ensurePaymentsForLoan($loan);
+                $this->loanPayments->syncStatusesForLoan($loan);
 
                 $loan = $loan->fresh(['child:id,name,username']);
                 $amountText = $this->notifications->money((int) $loan->amount * 100);
@@ -541,6 +540,8 @@ class LoanController extends Controller
 
                 $loan->status = 'approved';
                 $loan->rejection_reason = null;
+                $this->loanPayments->ensurePaymentsForLoan($loan);
+                $this->loanPayments->syncStatusesForLoan($loan);
             } else {
                 if ($parentBalance) {
                     $loanAmountCents = (int) $loan->amount * 100;
@@ -599,7 +600,79 @@ class LoanController extends Controller
 
         return response()->json([
             'message' => $validated['action'] === 'accept' ? 'Loan accepted.' : 'Loan rejected.',
-            'loan' => $result,
+            'loan' => $this->presentLoan($result->loadMissing(['payments' => fn ($query) => $query->orderBy('installment_number')])),
         ]);
+    }
+
+    public function pay(Request $request, LoanPayment $loanPayment): JsonResponse
+    {
+        $member = $request->user();
+
+        if (! $member || ! in_array($member->role, ['child', 'member'], true)) {
+            return response()->json(['message' => 'Solo los integrantes pueden pagar prestamos.'], 403);
+        }
+
+        try {
+            $result = $this->loanPayments->payInstallment($loanPayment, $member->id);
+        } catch (\RuntimeException $exception) {
+            return match ($exception->getMessage()) {
+                'PAYMENT_FORBIDDEN' => response()->json(['message' => 'Este pago no pertenece a tu prestamo.'], 403),
+                'LOAN_NOT_ACTIVE' => response()->json(['message' => 'Este prestamo no esta activo para recibir pagos.'], 422),
+                'PAYMENT_ALREADY_PAID' => response()->json(['message' => 'Este pago ya fue cubierto.'], 422),
+                'PAYMENT_NOT_DUE' => response()->json(['message' => 'Este pago aun no se puede adelantar.'], 422),
+                'INSUFFICIENT_BALANCE' => response()->json(['message' => 'No tienes saldo suficiente para cubrir este pago.'], 422),
+                default => throw $exception,
+            };
+        }
+
+        /** @var Loan $loan */
+        $loan = $result['loan'];
+        /** @var LoanPayment $payment */
+        $payment = $result['payment'];
+        $amountText = $this->notifications->money((int) $payment->total_amount_cents);
+        $childName = $loan->child?->name ?? 'Tu integrante';
+
+        $this->notifications->recordForMember(
+            $member->id,
+            'pago',
+            'prestamos',
+            'Pagaste la cuota '.$payment->installment_number.' por '.$amountText.'.'
+        );
+        $this->notifications->recordForParent(
+            (int) $loan->parent_user_id,
+            'pago',
+            'prestamos',
+            $childName.' pago la cuota '.$payment->installment_number.' por '.$amountText.'.'
+        );
+
+        if ($loan->status === 'paid') {
+            $this->notifications->recordForMember(
+                $member->id,
+                'cierre',
+                'prestamos',
+                'Terminaste de pagar este prestamo.'
+            );
+            $this->notifications->recordForParent(
+                (int) $loan->parent_user_id,
+                'cierre',
+                'prestamos',
+                $childName.' termino de pagar su prestamo.'
+            );
+        }
+
+        return response()->json([
+            'message' => 'Pago registrado correctamente.',
+            'payment' => $payment,
+            'loan' => $this->presentLoan($loan),
+            'member_balance_cents' => $result['member_balance_cents'],
+        ]);
+    }
+
+    private function presentLoan(Loan $loan): Loan
+    {
+        $summary = $this->loanPayments->buildSummary($loan);
+        $loan->setAttribute('payment_summary', $summary);
+
+        return $loan;
     }
 }

@@ -42,6 +42,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/loans', [LoanController::class, 'store']);
     Route::post('/loans/{loan}/approve', [LoanController::class, 'approve']);
     Route::post('/loans/{loan}/respond', [LoanController::class, 'respondToOffer']);
+    Route::post('/loan-payments/{loanPayment}/pay', [LoanController::class, 'pay']);
     Route::get('/education/courses', [EducationController::class, 'index']);
     Route::get('/parent/tasks', [TaskController::class, 'parentIndex']);
     Route::post('/parent/tasks', [TaskController::class, 'parentStore']);

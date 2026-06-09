@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Loan extends Model
 {
@@ -39,6 +40,11 @@ class Loan extends Model
     public function child(): BelongsTo
     {
         return $this->belongsTo(User::class, 'child_user_id');
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(LoanPayment::class)->orderBy('installment_number');
     }
 
     public function getInstallmentPlanAttribute(): array
