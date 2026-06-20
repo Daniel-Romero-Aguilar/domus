@@ -100,7 +100,9 @@ class AuthController extends Controller
             return response()->json(['message' => 'Invalid role for authenticated user.'], 422);
         }
 
-        $user->load('balance');
+        if ($user->role !== 'parent') {
+            $user->load('balance');
+        }
         $familyRelation = FamilyMember::query()
             ->where('user_id', $user->id)
             ->with('parent:id,name')

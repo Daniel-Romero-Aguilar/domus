@@ -6,6 +6,7 @@ use App\Models\Allowance;
 use App\Models\AllowancePayment;
 use App\Models\Balance;
 use App\Services\DomusNotificationService;
+use App\Support\BalanceHelper;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -112,51 +113,15 @@ class AllowanceService
                     ->firstOrFail();
             }
 
-            if ((int) $parentBalance->amount < $amountCents) {
-                $payment->fill([
-                    'status' => 'failed',
-                    'failed_at' => $now,
-                    'failure_reason' => 'Fondos insuficientes',
-                    'parent_balance_before' => (int) $parentBalance->amount,
-                    'parent_balance_after' => (int) $parentBalance->amount,
-                    'child_balance_before' => (int) $childBalance->amount,
-                    'child_balance_after' => (int) $childBalance->amount,
-                    'executed_at' => null,
-                ]);
-                $payment->save();
-
-                $allowance->status = 'paused';
-                $allowance->last_failed_at = $now;
-                $allowance->save();
-
-                $childName = $allowance->child?->name ?? 'un integrante';
-                $this->notifications->recordForParent(
-                    $allowance->parent_user_id,
-                    'fallo',
-                    'mesadas',
-                    'Tu mesada para '.$childName.' se pauso por fondos insuficientes.'
-                );
-
-                return [
-                    'executed' => false,
-                    'message' => 'Fondos insuficientes. Se pauso la mesada. Ingresa mas dinero para reactivarla.',
-                    'remaining_parent_balance' => (int) $parentBalance->amount,
-                    'allowance' => $allowance->fresh(['parent:id,name', 'child:id,name,username']),
-                    'payment' => $payment->fresh(),
-                ];
-            }
-
-            $parentBalanceBefore = (int) $parentBalance->amount;
+            $parentBalanceBefore = BalanceHelper::parentMoneyUsedCents($allowance->parent);
+            $parentBalanceAfter = $parentBalanceBefore + $amountCents;
             $childBalanceBefore = (int) $childBalance->amount;
-
-            $parentBalance->amount = (int) $parentBalance->amount - $amountCents;
-            $parentBalance->save();
 
             $parentBalance->movements()->create([
                 'amount_added' => $amountCents,
                 'movement_type' => 'allowance_debit',
                 'note' => 'Allowance paid to child',
-                'resulting_balance' => $parentBalance->amount,
+                'resulting_balance' => $parentBalanceAfter,
             ]);
 
             $childBalance->amount = (int) $childBalance->amount + $amountCents;
@@ -173,7 +138,7 @@ class AllowanceService
                 'status' => 'paid',
                 'amount_cents' => (int) $allowance->amount_cents,
                 'parent_balance_before' => $parentBalanceBefore,
-                'parent_balance_after' => (int) $parentBalance->amount,
+                'parent_balance_after' => $parentBalanceAfter,
                 'child_balance_before' => $childBalanceBefore,
                 'child_balance_after' => (int) $childBalance->amount,
                 'executed_at' => $now,
@@ -208,7 +173,7 @@ class AllowanceService
             return [
                 'executed' => true,
                 'message' => 'Mesada ejecutada correctamente.',
-                'remaining_parent_balance' => (int) $parentBalance->amount,
+                'remaining_parent_balance' => BalanceHelper::parentMoneyUsedCents($allowance->parent),
                 'allowance' => $allowance->fresh(['parent:id,name', 'child:id,name,username']),
                 'payment' => $payment->fresh(),
             ];

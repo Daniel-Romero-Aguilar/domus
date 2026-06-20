@@ -130,32 +130,15 @@ class TransferController extends Controller
 
                 $amountCents = (int) $transfer->amount_cents;
 
-                if ((int) $parentBalance->amount < $amountCents) {
-                    $transfer->fill([
-                        'status' => 'failed',
-                        'failure_reason' => 'Fondos insuficientes',
-                        'parent_balance_before' => (int) $parentBalance->amount,
-                        'parent_balance_after' => (int) $parentBalance->amount,
-                        'child_balance_before' => (int) $childBalance->amount,
-                        'child_balance_after' => (int) $childBalance->amount,
-                        'executed_at' => null,
-                    ]);
-                    $transfer->save();
-
-                    return $this->formatTransferResponse($transfer->fresh(['parent:id,name', 'child:id,name,username']), false);
-                }
-
-                $parentBalanceBefore = (int) $parentBalance->amount;
+                $parentBalanceBefore = BalanceHelper::parentMoneyUsedCents($parent);
+                $parentBalanceAfter = $parentBalanceBefore + $amountCents;
                 $childBalanceBefore = (int) $childBalance->amount;
-
-                $parentBalance->amount = $parentBalanceBefore - $amountCents;
-                $parentBalance->save();
 
                 $parentBalance->movements()->create([
                     'amount_added' => $amountCents,
                     'movement_type' => 'transfer_debit',
                     'note' => 'Transfer sent to child',
-                    'resulting_balance' => $parentBalance->amount,
+                    'resulting_balance' => $parentBalanceAfter,
                 ]);
 
                 $childBalance->amount = $childBalanceBefore + $amountCents;
@@ -171,7 +154,7 @@ class TransferController extends Controller
                 $transfer->fill([
                     'status' => 'completed',
                     'parent_balance_before' => $parentBalanceBefore,
-                    'parent_balance_after' => (int) $parentBalance->amount,
+                    'parent_balance_after' => $parentBalanceAfter,
                     'child_balance_before' => $childBalanceBefore,
                     'child_balance_after' => (int) $childBalance->amount,
                     'executed_at' => now()->startOfSecond(),
@@ -229,7 +212,7 @@ class TransferController extends Controller
     {
         $message = match ($transfer->status) {
             'completed' => $alreadyProcessed ? 'Esta transferencia ya habia sido procesada.' : 'Dinero enviado correctamente.',
-            'failed' => 'Fondos insuficientes. No se pudo enviar el dinero.',
+            'failed' => 'No se pudo enviar el dinero.',
             default => 'Transferencia registrada.',
         };
 
@@ -237,7 +220,9 @@ class TransferController extends Controller
             'message' => $message,
             'created' => ! $alreadyProcessed,
             'transfer' => $transfer,
-            'remaining_parent_balance' => $transfer->parent_balance_after,
+            'remaining_parent_balance' => BalanceHelper::parentMoneyUsedCents(
+                $transfer->relationLoaded('parent') && $transfer->parent ? $transfer->parent : $transfer->parent()->firstOrFail()
+            ),
             'executed' => $transfer->status === 'completed',
         ];
     }

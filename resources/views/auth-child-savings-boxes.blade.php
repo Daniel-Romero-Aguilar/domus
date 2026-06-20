@@ -28,13 +28,15 @@
     <aside id="sidebar" class="sidebar">
         <button id="sidebar-close" class="sidebar-close" type="button">x</button>
         <div class="sidebar-logo-wrap"><img class="sidebar-logo" src="/img/domus_logo.png" alt="Domus logo"></div>
-        <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p><p class="profile-level">Nivel 1 - Aprendiz financiero</p></section>
+        <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p><a id="sidebar-user-level" class="profile-level" href="/levels" style="display:block;color:inherit;text-decoration:none;">Cargando nivel...</a></section>
         <div id="sidebar-scroll" class="sidebar-scroll">
             <nav class="sidebar-nav">
                 <a class="sidebar-link" href="/account"><span class="nav-icon">&bull;</span><span>Inicio</span></a>
                 <a class="sidebar-link" href="/member/loans"><span class="nav-icon">&bull;</span><span>Prestamos</span></a>
                 <a class="sidebar-link is-active" href="/child/savings-boxes"><span class="nav-icon">&bull;</span><span>Cajas de ahorro</span></a>
+                <a class="sidebar-link" href="/child/goals"><span class="nav-icon">&bull;</span><span>Metas</span></a>
                 <a class="sidebar-link" href="/child/tasks"><span class="nav-icon">&bull;</span><span>Tareas</span></a>
+                <a class="sidebar-link" href="/child/domus-points"><span class="nav-icon">&bull;</span><span>Puntos Domus</span></a>
                 <a class="sidebar-link" href="/account/education"><span class="nav-icon">&bull;</span><span>Educacion</span></a>
             </nav>
             <div id="scroll-hint" class="scroll-hint">Desliza para ver mas</div>
@@ -52,7 +54,7 @@
 
 <script>
 const API_BASE='/api',TOKEN_KEY='parent_auth_token';
-const logoutButton=document.getElementById('logout-btn'),menuButton=document.getElementById('menu-btn'),sidebar=document.getElementById('sidebar'),sidebarUserName=document.getElementById('sidebar-user-name'),sidebarClose=document.getElementById('sidebar-close'),sidebarOverlay=document.getElementById('sidebar-overlay'),sidebarScroll=document.getElementById('sidebar-scroll'),scrollHint=document.getElementById('scroll-hint'),savingsList=document.getElementById('savings-list');
+const logoutButton=document.getElementById('logout-btn'),menuButton=document.getElementById('menu-btn'),sidebar=document.getElementById('sidebar'),sidebarUserName=document.getElementById('sidebar-user-name'),sidebarUserLevel=document.getElementById('sidebar-user-level'),sidebarClose=document.getElementById('sidebar-close'),sidebarOverlay=document.getElementById('sidebar-overlay'),sidebarScroll=document.getElementById('sidebar-scroll'),scrollHint=document.getElementById('scroll-hint'),savingsList=document.getElementById('savings-list');
 function getToken(){return localStorage.getItem(TOKEN_KEY);}
 function clearToken(){localStorage.removeItem(TOKEN_KEY);}
 function openSidebar(){sidebar.classList.add('is-open');sidebarOverlay.classList.add('is-open');}
@@ -71,6 +73,7 @@ function bindSavingsBoxes(){savingsList.querySelectorAll('.savings-summary-card'
 async function depositToSavingsBox(boxId,amount){return apiRequest('/savings-boxes/'+boxId+'/deposit','POST',{amount:amount});}
 async function withdrawFromSavingsBox(boxId,amount){return apiRequest('/savings-boxes/'+boxId+'/withdraw','POST',{amount:amount});}
 async function loadSavingsBoxes(){try{const response=await apiRequest('/savings-boxes','GET');const boxes=response.savings_boxes||[];if(boxes.length===0){savingsList.innerHTML='<section class="quick-card"><p class="quick-card-title">Sin cajas de ahorro</p><p class="quick-card-subtitle">Todavia no tienes cajas activas.</p></section>';return;}savingsList.innerHTML=boxes.map(renderSavingsBox).join('');bindSavingsBoxes();}catch(error){savingsList.innerHTML='<section class="quick-card"><p class="quick-card-title">Error</p><p class="quick-card-subtitle">'+escapeHtml(error?.data?.message||'No se pudieron cargar tus cajas de ahorro.')+'</p></section>';}}
+async function loadSidebarLevel(){try{const data=await apiRequest('/child/domus-points','GET');const level=data.level;sidebarUserLevel.textContent=level?('Nivel '+Number(level.level_number||1)+' - '+level.name):'Sin nivel';}catch(_error){sidebarUserLevel.textContent='Sin nivel';}}
 logoutButton.addEventListener('click',async()=>{try{await apiRequest('/logout','POST');}catch(error){}finally{clearToken();window.location.href='/login';}});
 menuButton.addEventListener('click',()=>{if(sidebar.classList.contains('is-open')){closeSidebar();return;}openSidebar();updateScrollHint();});
 sidebarClose.addEventListener('click',closeSidebar);
@@ -79,7 +82,7 @@ sidebarScroll.addEventListener('scroll',updateScrollHint);
 savingsList.addEventListener('submit',event=>{const form=event.target.closest('.savings-money-form');if(!form){return;}event.preventDefault();event.stopPropagation();const button=form.querySelector('button[type="submit"]'),input=form.querySelector('.savings-money-input'),boxId=Number(form.dataset.savingsId),amount=input.value.trim(),isWithdraw=form.classList.contains('savings-withdraw-form');if(!boxId||!amount){return;}button.disabled=true;(isWithdraw?withdrawFromSavingsBox(boxId,amount):depositToSavingsBox(boxId,amount)).then(async response=>{input.value='';window.alert(response.message||'Movimiento guardado.');await loadSavingsBoxes();}).catch(error=>{window.alert(error?.data?.message||'No se pudo guardar el movimiento.');}).finally(()=>{button.disabled=false;});});
 savingsList.addEventListener('click',event=>{if(event.target.closest('.savings-money-form')){event.stopPropagation();}});
 window.addEventListener('resize',()=>{if(window.innerWidth>=768){closeSidebar();}updateScrollHint();});
-(async function bootstrap(){updateScrollHint();if(!getToken()){window.location.href='/login';return;}try{const me=await apiRequest('/me','GET');if(me.user?.role==='parent'){window.location.href='/parent/savings-boxes';return;}if(me.user?.role!=='child'&&me.user?.role!=='member'){window.location.href='/account';return;}sidebarUserName.textContent=me.user?.name||'Usuario';await loadSavingsBoxes();}catch(error){if(error.status===401){clearToken();window.location.href='/login';return;}savingsList.innerHTML='<section class="quick-card"><p class="quick-card-title">Error de sesion</p><p class="quick-card-subtitle">No se pudo validar la sesion.</p></section>';}})();
+(async function bootstrap(){updateScrollHint();if(!getToken()){window.location.href='/login';return;}try{const me=await apiRequest('/me','GET');if(me.user?.role==='parent'){window.location.href='/parent/savings-boxes';return;}if(me.user?.role!=='child'&&me.user?.role!=='member'){window.location.href='/account';return;}sidebarUserName.textContent=me.user?.name||'Usuario';await loadSidebarLevel();await loadSavingsBoxes();}catch(error){if(error.status===401){clearToken();window.location.href='/login';return;}savingsList.innerHTML='<section class="quick-card"><p class="quick-card-title">Error de sesion</p><p class="quick-card-subtitle">No se pudo validar la sesion.</p></section>';}})();
 </script>
 </body>
 </html>

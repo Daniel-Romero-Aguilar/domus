@@ -8,8 +8,10 @@ use App\Models\BalanceMovement;
 use App\Models\FamilyMember;
 use App\Models\Loan;
 use App\Models\LoanPayment;
+use App\Services\DomusAchievementService;
 use App\Services\DomusNotificationService;
 use App\Services\LoanPaymentService;
+use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +22,7 @@ class LoanController extends Controller
 {
     public function __construct(
         private readonly DomusNotificationService $notifications,
+        private readonly DomusAchievementService $achievements,
         private readonly LoanPaymentService $loanPayments,
     )
     {
@@ -128,19 +131,43 @@ class LoanController extends Controller
 
         $this->loanPayments->syncStatusesForLoans($loans);
         $paidTotalCents = 0;
+        $monthStart = now()->startOfMonth();
+        $monthEnd = now()->endOfMonth();
 
         foreach ($loans as $loan) {
             $summary = $this->loanPayments->buildSummary($loan);
             $paidTotalCents += (int) $summary['paid_total_cents'];
         }
 
+        $interestGeneratedThisMonthCents = (int) LoanPayment::query()
+            ->selectRaw('COALESCE(SUM(loan_payments.interest_amount_cents), 0) as total')
+            ->join('loans', 'loans.id', '=', 'loan_payments.loan_id')
+            ->where('loans.parent_user_id', $parent->id)
+            ->where('loan_payments.status', 'paid')
+            ->whereBetween('loan_payments.paid_at', [$monthStart, $monthEnd])
+            ->value('total');
+
+        $interestGeneratedHistoricalCents = (int) LoanPayment::query()
+            ->selectRaw('COALESCE(SUM(loan_payments.interest_amount_cents), 0) as total')
+            ->join('loans', 'loans.id', '=', 'loan_payments.loan_id')
+            ->where('loans.parent_user_id', $parent->id)
+            ->where('loan_payments.status', 'paid')
+            ->value('total');
+
         return response()->json([
             'total_active_loans' => $loans->count(),
             'estimated_total_paid' => $paidTotalCents / 100,
+            'interest_generated_this_month' => $interestGeneratedThisMonthCents / 100,
+            'interest_generated_historical' => $interestGeneratedHistoricalCents / 100,
             'currency' => 'MXN',
             'meta' => [
                 'is_estimated' => false,
                 'estimation_note' => 'The total now comes from the actual payment ledger.',
+                'interest_source' => 'paid loan payments only',
+                'interest_period' => [
+                    'from' => $monthStart->toDateString(),
+                    'to' => $monthEnd->toDateString(),
+                ],
             ],
         ]);
     }
@@ -263,7 +290,7 @@ class LoanController extends Controller
 
         if ($actor->role === 'parent') {
             try {
-                $payload = DB::transaction(function () use ($parentId, $loanData) {
+                $payload = DB::transaction(function () use ($actor, $parentId, $loanData) {
                 $loan = Loan::create([
                     'parent_user_id' => $parentId,
                     ...$loanData,
@@ -289,18 +316,14 @@ class LoanController extends Controller
                         ->firstOrFail();
                 }
 
-                if ((int) $balance->amount < $loanAmountCents) {
-                    throw new \RuntimeException('INSUFFICIENT_BALANCE');
-                }
-
-                $balance->amount = (int) $balance->amount - $loanAmountCents;
-                $balance->save();
+                $parentMoneyUsedBefore = BalanceHelper::parentMoneyUsedCents($actor);
+                $parentMoneyUsedAfter = $parentMoneyUsedBefore + $loanAmountCents;
 
                 $balance->movements()->create([
                     'amount_added' => $loanAmountCents,
                     'movement_type' => 'loan_reserve',
-                    'note' => 'Loan reserved while waiting for child response',
-                    'resulting_balance' => $balance->amount,
+                    'note' => 'Loan offered while waiting for child response',
+                    'resulting_balance' => $parentMoneyUsedAfter,
                 ]);
 
                 $loan = $loan->fresh(['child:id,name,username']);
@@ -322,19 +345,19 @@ class LoanController extends Controller
 
                 return [
                     'loan' => $loan,
-                    'remaining_balance' => (int) $balance->amount,
+                    'remaining_balance' => $parentMoneyUsedAfter,
                 ];
                 });
             } catch (\RuntimeException $exception) {
                 if ($exception->getMessage() === 'INSUFFICIENT_BALANCE') {
-                    return response()->json(['message' => 'No tienes fondos suficientes para crear este prestamo.'], 422);
+                    return response()->json(['message' => 'No se pudo crear este prestamo.'], 422);
                 }
 
                 throw $exception;
             }
 
             return response()->json([
-                'message' => 'Loan offer created and balance reserved successfully.',
+                'message' => 'Loan offer created successfully.',
                 'loan' => $payload['loan'],
                 'remaining_balance' => $payload['remaining_balance'],
             ], 201);
@@ -397,18 +420,14 @@ class LoanController extends Controller
 
                 $loanAmountCents = (int) $loan->amount * 100;
 
-                if ((int) $balance->amount < $loanAmountCents) {
-                    throw new \RuntimeException('INSUFFICIENT_BALANCE');
-                }
-
-                $balance->amount = (int) $balance->amount - $loanAmountCents;
-                $balance->save();
+                $parentMoneyUsedBefore = BalanceHelper::parentMoneyUsedCents($parent);
+                $parentMoneyUsedAfter = $parentMoneyUsedBefore + $loanAmountCents;
 
                 $balance->movements()->create([
                     'amount_added' => $loanAmountCents,
                     'movement_type' => 'loan_debit',
                     'note' => 'Loan approval',
-                    'resulting_balance' => $balance->amount,
+                    'resulting_balance' => $parentMoneyUsedAfter,
                 ]);
 
                 $childBalance = Balance::query()
@@ -463,12 +482,12 @@ class LoanController extends Controller
 
                 return [
                     'loan' => $loan,
-                    'remaining_balance' => (int) $balance->amount,
+                    'remaining_balance' => $parentMoneyUsedAfter,
                 ];
             });
         } catch (\RuntimeException $exception) {
             if ($exception->getMessage() === 'INSUFFICIENT_BALANCE') {
-                return response()->json(['message' => 'No tienes fondos suficientes para aprobar este prestamo.'], 422);
+                return response()->json(['message' => 'No se pudo aprobar este prestamo.'], 422);
             }
 
             throw $exception;
@@ -545,15 +564,15 @@ class LoanController extends Controller
             } else {
                 if ($parentBalance) {
                     $loanAmountCents = (int) $loan->amount * 100;
-
-                    $parentBalance->amount = (int) $parentBalance->amount + $loanAmountCents;
-                    $parentBalance->save();
+                    $parentUser = $loan->parent()->firstOrFail();
+                    $parentMoneyUsedBefore = BalanceHelper::parentMoneyUsedCents($parentUser);
+                    $parentMoneyUsedAfter = max($parentMoneyUsedBefore - $loanAmountCents, 0);
 
                     $parentBalance->movements()->create([
                         'amount_added' => $loanAmountCents,
                         'movement_type' => 'loan_refund',
                         'note' => 'Loan rejected by child',
-                        'resulting_balance' => $parentBalance->amount,
+                        'resulting_balance' => $parentMoneyUsedAfter,
                     ]);
                 }
 
@@ -595,12 +614,16 @@ class LoanController extends Controller
                 );
             }
 
-            return $loan;
+            return [
+                'loan' => $loan,
+                'member_balance_cents' => (int) $childBalance->amount,
+            ];
         });
 
         return response()->json([
             'message' => $validated['action'] === 'accept' ? 'Loan accepted.' : 'Loan rejected.',
-            'loan' => $this->presentLoan($result->loadMissing(['payments' => fn ($query) => $query->orderBy('installment_number')])),
+            'loan' => $this->presentLoan($result['loan']->loadMissing(['payments' => fn ($query) => $query->orderBy('installment_number')])),
+            'member_balance_cents' => $result['member_balance_cents'],
         ]);
     }
 
@@ -660,11 +683,19 @@ class LoanController extends Controller
             );
         }
 
+        $achievements = $this->achievements->unlockFirstLoanPayment($member->id, [
+            'loan_id' => $loan->id,
+            'loan_payment_id' => $payment->id,
+            'installment_number' => $payment->installment_number,
+        ]);
+
         return response()->json([
             'message' => 'Pago registrado correctamente.',
             'payment' => $payment,
             'loan' => $this->presentLoan($loan),
             'member_balance_cents' => $result['member_balance_cents'],
+            'new_balance_cents' => $result['member_balance_cents'],
+            'achievements' => $achievements,
         ]);
     }
 

@@ -33,7 +33,7 @@
     <aside id="sidebar" class="sidebar">
         <button id="sidebar-close" class="sidebar-close" type="button">x</button>
         <div class="sidebar-logo-wrap"><img class="sidebar-logo" src="/img/domus_logo.png" alt="Domus logo"></div>
-        <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p><p class="profile-level">Nivel 1 - Aprendiz financiero</p></section>
+        <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p></section>
         <div id="sidebar-scroll" class="sidebar-scroll">
             <nav class="sidebar-nav">
                 <a class="sidebar-link" href="/account"><span class="nav-icon">&bull;</span><span>Inicio</span></a>
@@ -43,6 +43,7 @@
                 <a class="sidebar-link" href="/parent/allowances"><span class="nav-icon">&bull;</span><span>Mesadas</span></a>
                 <a class="sidebar-link is-active" href="/parent/savings-boxes"><span class="nav-icon">&bull;</span><span>Cajas de ahorro</span></a>
                 <a class="sidebar-link" href="/parent/tasks"><span class="nav-icon">&bull;</span><span>Tareas</span></a>
+                <a class="sidebar-link" href="/parent/domus-points"><span class="nav-icon">&bull;</span><span>Puntos Domus</span></a>
                 <a class="sidebar-link" href="/account/education"><span class="nav-icon">&bull;</span><span>Educacion</span></a>
             </nav>
             <div id="scroll-hint" class="scroll-hint">Desliza para ver mas</div>

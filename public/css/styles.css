@@ -855,6 +855,336 @@ iframe {
   text-transform: uppercase;
 }
 
+.users-summary-table-wrap {
+  overflow-x: auto;
+}
+
+.users-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 620px;
+}
+
+.users-summary-table th,
+.users-summary-table td {
+  padding: 12px 10px;
+  border-top: 1px solid #dbe4f0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.users-summary-table th {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.users-summary-user {
+  display: grid;
+  gap: 4px;
+}
+
+.users-summary-name {
+  margin: 0;
+  color: var(--blue-900);
+  font-weight: 800;
+}
+
+.users-summary-level {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.users-summary-empty {
+  color: #64748b;
+  text-align: center;
+}
+
+.users-summary-action-cell {
+  text-align: right;
+}
+
+.users-summary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: var(--blue-900);
+  text-decoration: none;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.loans-distribution-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.loans-distribution-chart-wrap {
+  position: relative;
+  min-height: 280px;
+}
+
+.loans-distribution-table {
+  min-width: 100%;
+}
+
+.loan-health-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.loan-health-badge-current {
+  background: #edf8ef;
+  color: #267447;
+}
+
+.loan-health-badge-due-soon {
+  background: #fff6df;
+  color: #9a6700;
+}
+
+.loan-health-badge-overdue {
+  background: #fff2f0;
+  color: #b9382f;
+}
+
+.user-detail-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.user-detail-meta {
+  display: grid;
+  gap: 10px;
+}
+
+.user-detail-meta-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.user-detail-meta-label {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.user-detail-loans {
+  display: grid;
+  gap: 12px;
+}
+
+.user-loan-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dbe4f0;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.user-loan-grid {
+  display: grid;
+  gap: 10px;
+}
+
+@media (min-width: 768px) {
+  .user-detail-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .user-detail-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .user-loan-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .loans-distribution-layout {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    align-items: center;
+  }
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--blue-900);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.education-list {
+  display: grid;
+  gap: 12px;
+}
+
+.education-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  box-shadow: 0 10px 24px rgba(2, 27, 87, 0.08);
+  text-decoration: none;
+  color: inherit;
+}
+
+.education-card-eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold-500);
+}
+
+.education-card-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--blue-900);
+}
+
+.education-card-text {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.education-card-meta {
+  color: var(--blue-700);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.education-hero {
+  background: linear-gradient(135deg, #0b2a77, #1546aa);
+}
+
+.education-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.lesson-sidebar-panel,
+.lesson-view-card {
+  background: #ffffff;
+  border: 1px solid #dbe4f0;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(2, 27, 87, 0.08);
+}
+
+.lesson-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.lesson-switch {
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #dbe4f0;
+  background: #f8fafc;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.lesson-switch.is-active {
+  border-color: var(--gold-500);
+  background: #fff7e3;
+}
+
+.lesson-switch.is-completed {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.lesson-counter {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--blue-700);
+}
+
+.lesson-view-title {
+  margin: 10px 0 8px;
+  color: var(--blue-900);
+}
+
+.lesson-section-title {
+  margin: 0 0 8px;
+  color: var(--blue-900);
+}
+
+.lesson-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.lesson-parts {
+  display: grid;
+  gap: 14px;
+}
+
+.assessment-form {
+  display: grid;
+  gap: 12px;
+}
+
+.lesson-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.progress-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #eaf2ff;
+  color: var(--blue-900);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.lesson-countdown {
+  color: #92400e;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 @media (max-width: 520px) {
   .card {
     padding: 24px 18px;
@@ -892,5 +1222,80 @@ iframe {
 
   .choice-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .education-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .education-shell {
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .lesson-sidebar-panel {
+    position: sticky;
+    top: 24px;
+  }
+}
+
+/* Loans detail panels: keep content contained and readable on medium widths */
+.loan-detail-card {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.loan-detail-card .top-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.loan-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 1rem 1.25rem !important;
+  width: 100%;
+}
+
+.loan-detail-grid > div,
+.loan-payment-stats > div,
+.loan-stat-box {
+  min-width: 0;
+}
+
+.loan-detail-value,
+.loan-meta-note,
+.quick-card-subtitle {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.loan-payment-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+  gap: 0.85rem !important;
+  width: 100%;
+}
+
+.loan-stat-box {
+  width: 100%;
+}
+
+.loan-payments-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.loan-payments-table {
+  width: 100%;
+  min-width: 680px;
+}
+
+@media (max-width: 900px) {
+  .loan-payment-stats {
+    grid-template-columns: 1fr !important;
   }
 }

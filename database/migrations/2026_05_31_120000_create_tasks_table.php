@@ -15,7 +15,7 @@ return new class extends Migration
             $table->string('description', 255)->nullable();
             $table->unsignedBigInteger('reward_amount')->default(0);
             $table->unsignedInteger('reward_points')->default(0);
-            $table->string('status', 20)->default('open');
+            $table->string('status', 40)->default('open');
             $table->timestamps();
         });
     }
@@ -25,4 +25,3 @@ return new class extends Migration
         Schema::dropIfExists('tasks');
     }
 };
-

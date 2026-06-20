@@ -25,7 +25,7 @@
     <aside id="sidebar" class="sidebar">
         <button id="sidebar-close" class="sidebar-close" type="button">x</button>
         <div class="sidebar-logo-wrap"><img class="sidebar-logo" src="/img/domus_logo.png" alt="Domus logo"></div>
-        <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p><p class="profile-level">Nivel 1 - Aprendiz financiero</p></section>
+        <section class="profile-card"><p id="sidebar-user-name" class="profile-name">Usuario</p></section>
         <div id="sidebar-scroll" class="sidebar-scroll">
             <nav class="sidebar-nav">
                 <a class="sidebar-link" href="/account"><span class="nav-icon">&bull;</span><span>Inicio</span></a>
@@ -35,6 +35,7 @@
                 <a class="sidebar-link" href="/parent/allowances"><span class="nav-icon">&bull;</span><span>Mesadas</span></a>
                 <a class="sidebar-link" href="/parent/savings-boxes"><span class="nav-icon">&bull;</span><span>Cajas de ahorro</span></a>
                 <a class="sidebar-link" href="/parent/tasks"><span class="nav-icon">&bull;</span><span>Tareas</span></a>
+                <a class="sidebar-link" href="/parent/domus-points"><span class="nav-icon">&bull;</span><span>Puntos Domus</span></a>
                 <a class="sidebar-link" href="/account/education"><span class="nav-icon">&bull;</span><span>Educacion</span></a>
             </nav>
             <div id="scroll-hint" class="scroll-hint">Desliza para ver mas</div>
@@ -85,8 +86,8 @@
             <div><p class="transfer-detail-label">Destinatario</p><p data-field="child" class="transfer-detail-value"></p></div>
             <div><p class="transfer-detail-label">Estado</p><p data-field="status" class="transfer-detail-value"></p></div>
             <div><p class="transfer-detail-label">Fecha</p><p data-field="executed_at" class="transfer-detail-value"></p></div>
-            <div><p class="transfer-detail-label">Saldo antes</p><p data-field="parent_before" class="transfer-detail-value"></p></div>
-            <div><p class="transfer-detail-label">Saldo despues</p><p data-field="parent_after" class="transfer-detail-value"></p></div>
+            <div><p class="transfer-detail-label">Registro antes</p><p data-field="parent_before" class="transfer-detail-value"></p></div>
+            <div><p class="transfer-detail-label">Registro despues</p><p data-field="parent_after" class="transfer-detail-value"></p></div>
         </div>
         <div data-field="alert"></div>
     </section>
@@ -108,13 +109,13 @@ function toMoneyFromCents(value){const amount=Number(value||0)/100;return '$'+am
 function formatDateTime(value){if(!value){return '-';}const date=new Date(value);if(Number.isNaN(date.getTime())){return String(value);}return date.toLocaleString('es-MX');}
 function getStatusLabel(status){const labels={completed:'Dinero enviado',failed:'Envio fallido',processing:'Procesando'};return labels[String(status||'').toLowerCase()]||'Estado no definido';}
 function getLatestFailureReason(transfer){return transfer.failure_reason||'';}
-function getTransferAlert(transfer){const reason=String(getLatestFailureReason(transfer)||'').toLowerCase();if(transfer.status!=='failed'){return '';}if(reason.includes('fondos')||reason.includes('saldo')){return '<div class="transfer-alert">Fondos insuficientes. No se pudo enviar el dinero.<small>Ingresa mas saldo y vuelve a intentar.</small></div>';}return '<div class="transfer-alert">No se pudo enviar el dinero.<small>Revisa el detalle para ver el motivo.</small></div>';}
+function getTransferAlert(transfer){const reason=String(getLatestFailureReason(transfer)||'').toLowerCase();if(transfer.status!=='failed'){return '';}if(reason.includes('fondos')||reason.includes('saldo')){return '<div class="transfer-alert">Este envio fallo con una regla anterior de saldo.<small>Intenta enviarlo de nuevo; el padre ya no necesita saldo disponible.</small></div>';}return '<div class="transfer-alert">No se pudo enviar el dinero.<small>Revisa el detalle para ver el motivo.</small></div>';}
 function parseMoneyToCents(value){const normalized=String(value??'').trim().replace(',','.');if(!/^\d+(?:\.\d{1,2})?$/.test(normalized)){return null;}const parts=normalized.split('.');const whole=Number(parts[0]||0);const fraction=String(parts[1]||'').padEnd(2,'0').slice(0,2);return (whole*100)+Number(fraction);}
 function generateIdempotencyKey(){return (window.crypto&&crypto.randomUUID)?crypto.randomUUID():'key-'+Date.now()+'-'+Math.random().toString(16).slice(2);}
 function setFeedback(message,type){transferFeedback.textContent=message;transferFeedback.className='feedback-box '+type;}
 function clearFeedback(){transferFeedback.textContent='';transferFeedback.className='feedback-box is-hidden';}
 async function apiRequest(path,method,payload,extraHeaders={}){const token=getToken();const headers={Accept:'application/json','Content-Type':'application/json',...extraHeaders};if(token){headers.Authorization='Bearer '+token;}const response=await fetch(API_BASE+path,{method,headers,body:payload?JSON.stringify(payload):undefined});const data=await response.json().catch(()=>({}));if(!response.ok){throw {status:response.status,data};}return data;}
-function updateBalanceNote(){parentBalanceNote.textContent='* Cuentas con '+toMoneyFromCents(currentParentBalance)+' para enviar dinero';}
+function updateBalanceNote(){parentBalanceNote.textContent='Dinero entregado registrado: '+toMoneyFromCents(currentParentBalance);}
 function showList(){closeTransferDetail();transfersListPanel.classList.remove('is-hidden');membersPanel.classList.add('is-hidden');formPanel.classList.add('is-hidden');transfersTabList.classList.remove('gold-btn');transfersTabList.classList.add('blue-btn');transfersTabCreate.classList.remove('blue-btn');transfersTabCreate.classList.add('gold-btn');}
 function showCreate(){closeTransferDetail();transfersListPanel.classList.add('is-hidden');membersPanel.classList.remove('is-hidden');formPanel.classList.add('is-hidden');transfersTabCreate.classList.remove('gold-btn');transfersTabCreate.classList.add('blue-btn');transfersTabList.classList.remove('blue-btn');transfersTabList.classList.add('gold-btn');renderMembersForTransfer();}
 function openTransferForm(target){selectedMemberId=target.user_id;selectedMemberLabel.textContent=target.name+' (@'+(target.username||'sin_username')+')';transferIdempotencyInput.value=generateIdempotencyKey();membersPanel.classList.add('is-hidden');formPanel.classList.remove('is-hidden');clearFeedback();}

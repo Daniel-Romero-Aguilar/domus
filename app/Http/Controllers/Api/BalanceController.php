@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Balance;
+use App\Services\DomusAchievementService;
 use App\Services\DomusNotificationService;
 use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
@@ -13,7 +14,10 @@ use Illuminate\Support\Facades\DB;
 
 class BalanceController extends Controller
 {
-    public function __construct(private readonly DomusNotificationService $notifications)
+    public function __construct(
+        private readonly DomusNotificationService $notifications,
+        private readonly DomusAchievementService $achievements,
+    )
     {
     }
 
@@ -57,6 +61,12 @@ class BalanceController extends Controller
                 'Agregaste '.$this->notifications->money($amountCents).' a tu saldo.'
             );
 
+            $achievements = $this->achievements->unlockFirstDeposit($user->id, [
+                'movement_type' => 'credit',
+                'amount_cents' => $amountCents,
+                'movement_id' => $movement->id,
+            ]);
+
             return [
                 'balance' => $balance->amount,
                 'movement' => [
@@ -65,12 +75,14 @@ class BalanceController extends Controller
                     'resulting_balance' => $movement->resulting_balance,
                     'created_at' => $movement->created_at,
                 ],
+                'achievements' => $achievements,
             ];
         });
 
         return response()->json([
             'message' => 'Balance updated.',
             'data' => $payload,
+            'achievements' => $payload['achievements'] ?? [],
         ]);
     }
 }

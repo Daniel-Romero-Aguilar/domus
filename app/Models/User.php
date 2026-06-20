@@ -7,6 +7,7 @@ use Database\Factories\UserFactory;
 use App\Models\Balance;
 use App\Support\BalanceHelper;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -83,6 +84,23 @@ class User extends Authenticatable
     public function domusNotifications(): HasMany
     {
         return $this->hasMany(DomusNotification::class);
+    }
+
+    public function lessonCompletions(): HasMany
+    {
+        return $this->hasMany(LessonCompletion::class);
+    }
+
+    public function domusMissions(): BelongsToMany
+    {
+        return $this->belongsToMany(DomusMission::class, 'domus_mission_user')
+            ->withPivot(['awarded_points', 'completed_at', 'meta'])
+            ->withTimestamps();
+    }
+
+    public function domusMissionCompletions(): HasMany
+    {
+        return $this->hasMany(DomusMissionUser::class);
     }
 
     public function getBalanceCentsAttribute(): int

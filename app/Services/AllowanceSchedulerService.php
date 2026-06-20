@@ -38,7 +38,6 @@ class AllowanceSchedulerService
         for ($i = 0; $i < self::MAX_PAYMENTS_PER_TICK; $i++) {
             $query = Allowance::query()
                 ->with(['parent:id,name', 'child:id,name,username'])
-                ->where('status', '!=', 'paused')
                 ->whereDate('start_at', '<=', $now->toDateString())
                 ->where('next_run_at', '<=', $now)
                 ->orderBy('next_run_at')
@@ -87,7 +86,6 @@ class AllowanceSchedulerService
         }
 
         $summary['remaining_due_allowances'] = Allowance::query()
-            ->where('status', '!=', 'paused')
             ->whereDate('start_at', '<=', $now->toDateString())
             ->where('next_run_at', '<=', $now)
             ->count();
