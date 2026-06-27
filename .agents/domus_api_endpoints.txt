@@ -1,0 +1,225 @@
+DOMUS API ENDPOINTS
+
+Auth
+POST /api/register
+Body: name, email, password, password_confirmation, terms_accepted
+Returns: token, user
+
+POST /api/login
+Body: login, password
+Returns: token, user
+
+GET /api/me
+Auth: bearer token
+Returns: user, parent_admin_name, is_family_member
+
+POST /api/logout
+Auth: bearer token
+Returns: message
+
+GET /api/notifications
+Auth: bearer token
+Returns: notifications
+
+Domus points
+GET /api/domus-levels
+Auth: bearer token
+Returns: levels
+
+GET /api/parent/domus-points
+Auth: parent
+Returns: summary, rewards, redemptions
+
+POST /api/parent/domus-points/rewards
+Auth: parent
+Body: title, description, points, child_user_id, available_from, expires_at
+Returns: reward
+
+POST /api/parent/domus-points/redemptions/{redemption}/pay
+Auth: parent
+Returns: redemption
+
+GET /api/child/domus-points
+Auth: child/member
+Returns: points, rewards, redemptions
+
+POST /api/child/domus-points/rewards/{reward}/redeem
+Auth: child/member
+Returns: redemption
+
+Goals
+GET /api/child/goals
+Auth: child/member
+Returns: goals, balance_cents, balance_display
+
+POST /api/child/goals
+Auth: child/member
+Body: name, description, target_amount
+Returns: goal
+
+POST /api/child/goals/{goal}/deposit
+Auth: child/member
+Body: amount
+Returns: goal, balance
+
+POST /api/child/goals/{goal}/withdraw
+Auth: child/member
+Body: amount
+Returns: goal, balance
+
+POST /api/child/goals/{goal}/complete
+Auth: child/member
+Returns: goal
+
+POST /api/child/goals/{goal}/cancel
+Auth: child/member
+Returns: goal, balance
+
+Balance
+POST /api/balance/add
+Auth: bearer token
+Body: amount
+Returns: balance, movement, achievements
+
+Transfers
+GET /api/transfers
+Auth: parent
+Returns: transfers
+
+POST /api/transfers
+Auth: parent
+Header: Idempotency-Key
+Body: child_user_id, amount
+Returns: transfer, remaining_parent_balance
+
+Family members
+GET /api/family-members
+Auth: parent
+Returns: members, loan_targets
+
+GET /api/family-members-summary
+Auth: parent
+Returns: members
+
+GET /api/family-members/{user}/summary
+Auth: parent
+Returns: member, loans
+
+POST /api/family-members
+Auth: parent
+Body: name, username, password, password_confirmation, is_minor, guardian_declaration_accepted
+Returns: member
+
+Allowances
+GET /api/allowances
+Auth: parent
+Returns: allowances, summary
+
+POST /api/allowances
+Auth: parent
+Body: child_user_id, amount, frequency, first_payment_immediate, start_at
+Returns: allowance, result
+
+POST /api/allowances/{allowance}/execute
+Auth: parent
+Returns: execution result
+
+Savings boxes
+GET /api/savings-boxes
+Auth: family user
+Returns: savings_boxes
+
+POST /api/savings-boxes
+Auth: parent
+Body: name, delivery_date, annual_gain_percent, allow_early_withdrawal, audience, member_user_ids[]
+Returns: savings_box
+
+POST /api/savings-boxes/{savingsBox}/deposit
+Auth: child/member
+Body: amount
+Returns: remaining_balance, account
+
+POST /api/savings-boxes/{savingsBox}/withdraw
+Auth: child/member
+Body: amount
+Returns: remaining_balance, account
+
+Loans
+GET /api/loans
+Auth: family user
+Returns: loans
+
+GET /api/loans/waiting
+Auth: family user
+Returns: loans
+
+GET /api/loans/active-total
+Auth: parent
+Returns: total_active_loans, estimated_total_paid, interest_generated_this_month, interest_generated_historical, currency
+
+POST /api/loans
+Auth: parent or child/member
+Body: child_user_id, amount, reason, due_date, installments_count, installment_frequency, has_interest, interest_mode, annual_interest_rate, fixed_interest_amount
+Returns: loan
+
+POST /api/loans/{loan}/approve
+Auth: parent
+Returns: loan, remaining_balance
+
+POST /api/loans/{loan}/respond
+Auth: child/member
+Body: action, reason
+Returns: loan, member_balance_cents
+
+POST /api/loan-payments/{loanPayment}/pay
+Auth: child/member
+Returns: payment, loan, member_balance_cents, new_balance_cents, achievements
+
+Education
+GET /api/education/categories
+Auth: bearer token
+Returns: categories
+
+GET /api/education/categories/{category}/courses
+Auth: bearer token
+Returns: courses
+
+GET /api/education/courses/{course}
+Auth: bearer token
+Returns: course
+
+POST /api/education/lessons/{lesson}/complete
+Auth: bearer token
+Returns: message
+
+POST /api/education/lesson-parts/{lessonPart}/submit
+Auth: bearer token
+Body: answer fields depend on lesson part
+Returns: result
+
+Tasks
+GET /api/parent/tasks
+Auth: parent
+Returns: tasks
+
+POST /api/parent/tasks
+Auth: parent
+Body: title, description, reward_points, child_user_id, due_date, etc.
+Returns: task
+
+POST /api/parent/tasks/{task}/review
+Auth: parent
+Body: action, note/reason if needed
+Returns: task
+
+GET /api/child/tasks
+Auth: child/member
+Returns: tasks
+
+POST /api/child/tasks/{task}/accept
+Auth: child/member
+Returns: task
+
+POST /api/tasks/member/completed/{task}
+Auth: child/member
+Returns: task
