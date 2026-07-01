@@ -12,6 +12,7 @@ use App\Models\LessonExamRewardGrant;
 use App\Models\LessonExamRewardRule;
 use App\Models\LessonPart;
 use App\Services\EducationExamRewardService;
+use App\Services\DomusPointsAccountService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,7 @@ class EducationController extends Controller
 {
     public function __construct(
         private readonly EducationExamRewardService $examRewards,
+        private readonly DomusPointsAccountService $pointsAccount,
     )
     {
     }
@@ -264,7 +266,7 @@ class EducationController extends Controller
 
         abort_unless($lesson->course?->is_active && $lesson->course?->category?->is_active, 404);
 
-        LessonCompletion::query()->updateOrCreate(
+        $completion = LessonCompletion::query()->updateOrCreate(
             [
                 'user_id' => $request->user()->id,
                 'lesson_id' => $lesson->id,
@@ -275,7 +277,25 @@ class EducationController extends Controller
             ]
         );
 
-        return response()->json(['message' => 'Leccion marcada como completada.']);
+        $courseLessonIds = $lesson->course->lessons()->pluck('id');
+        $completedLessons = LessonCompletion::query()
+            ->where('user_id', $request->user()->id)
+            ->where('is_completed', true)
+            ->whereIn('lesson_id', $courseLessonIds)
+            ->count();
+
+        return response()->json([
+            'message' => 'Leccion marcada como completada.',
+            'lesson_completion' => [
+                'lesson_id' => (int) $lesson->id,
+                'is_completed' => true,
+                'completed_at' => $completion->completed_at?->toISOString(),
+            ],
+            'progress' => [
+                'completed_lessons' => $completedLessons,
+                'total_lessons' => $courseLessonIds->count(),
+            ],
+        ]);
     }
 
     public function submitAssessment(Request $request, LessonPart $lessonPart): JsonResponse
@@ -389,6 +409,9 @@ class EducationController extends Controller
                 )
                 : null,
             'achievements' => $achievements,
+            'domus_points' => $lessonPart->type === 'exam'
+                ? $this->pointsAccount->snapshotForChild((int) $request->user()->id)
+                : null,
         ]);
     }
 

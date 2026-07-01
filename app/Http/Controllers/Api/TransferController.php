@@ -216,13 +216,19 @@ class TransferController extends Controller
             default => 'Transferencia registrada.',
         };
 
+        $remainingParentBalance = BalanceHelper::parentMoneyUsedCents(
+            $transfer->relationLoaded('parent') && $transfer->parent ? $transfer->parent : $transfer->parent()->firstOrFail()
+        );
+        $childBalance = $transfer->child_balance_after;
+
         return [
             'message' => $message,
             'created' => ! $alreadyProcessed,
             'transfer' => $transfer,
-            'remaining_parent_balance' => BalanceHelper::parentMoneyUsedCents(
-                $transfer->relationLoaded('parent') && $transfer->parent ? $transfer->parent : $transfer->parent()->firstOrFail()
-            ),
+            'remaining_parent_balance' => $remainingParentBalance,
+            'remaining_parent_balance_display' => BalanceHelper::displayCents((int) $remainingParentBalance),
+            'child_balance_cents' => $childBalance === null ? null : (int) $childBalance,
+            'child_balance_display' => $childBalance === null ? null : BalanceHelper::displayCents((int) $childBalance),
             'executed' => $transfer->status === 'completed',
         ];
     }

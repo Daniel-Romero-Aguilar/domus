@@ -1,0 +1,52 @@
+DOMUS FLUTTER - PANTALLA TAREAS PADRE
+
+Objetivo
+Padre crea tareas con recompensa y revisa cuando el hijo pide confirmacion.
+
+Pantalla
+Nombre recomendado: ParentTasksPage.
+
+Endpoints
+- GET /api/parent/tasks.
+- POST /api/parent/tasks.
+- POST /api/parent/tasks/{task}/review.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Titulo: Tareas.
+- Texto: asigna tareas y recompensa el esfuerzo.
+- Mostrar dinero comprometido o disponible segun available_balance_display.
+
+Seccion 2: Pestanas o botones.
+- Mis tareas.
+- Crear tarea.
+
+Seccion 3: Lista de tareas.
+Cada TaskCard muestra:
+- Nombre.
+- Descripcion.
+- Recompensa en dinero.
+- Puntos Domus.
+- Estado.
+- Usuario que acepto.
+- Fecha de solicitud de revision si existe.
+- Boton aprobar si esta esperando confirmacion.
+- Boton devolver para rehacer si esta esperando confirmacion.
+- Boton cancelar si aun se puede.
+
+Seccion 4: Crear tarea.
+Formulario:
+- Nombre.
+- Descripcion.
+- Recompensa en dinero.
+- Puntos Domus.
+- Texto bajo puntos: 100 es el maximo y representa una tarea muy grande, dificil o meritoria.
+- Boton crear.
+
+Actualizacion
+- Crear devuelve task y available_balance_display.
+- Aprobar devuelve task, available_child_balance_display, unlocked_badges y domus_points.
+- Devolver devuelve task.
+- Cancelar devuelve task y available_balance_display.
+- Si hay unlocked_badges, mostrar modal de insignias.
+- Si hay domus_points, actualizar puntos y nivel del hijo si esta en estado global.

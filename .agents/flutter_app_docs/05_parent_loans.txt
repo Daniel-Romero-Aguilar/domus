@@ -1,0 +1,71 @@
+DOMUS FLUTTER - PANTALLA PRESTAMOS PADRE
+
+Objetivo
+Padre crea prestamos, aprueba solicitudes, revisa deuda y pagos.
+
+Pantalla
+Nombre recomendado: ParentLoansPage.
+
+Endpoints
+- GET /api/loans.
+- GET /api/loans/waiting.
+- GET /api/loans/active-total.
+- POST /api/loans.
+- POST /api/loans/{loan}/approve.
+- GET /api/family-members para seleccionar hijo.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Titulo: Prestamos.
+- Texto: administra prestamos de tu familia.
+- Tarjeta resumen con total prestado, capital recuperado, capital pendiente e intereses.
+
+Seccion 2: Filtros o pestanas.
+- Activos.
+- Pendientes.
+- Historial.
+- Todas las pestanas usan LoanCard.
+
+Seccion 3: Lista de prestamos.
+Cada LoanCard muestra:
+- Nombre del hijo.
+- Monto prestado.
+- Motivo.
+- Estado.
+- Fecha de vencimiento.
+- Numero de cuotas.
+- Frecuencia.
+- Interes aplicado.
+- Total a pagar.
+- Capital pendiente.
+- Interes pendiente.
+- Proxima cuota.
+- Pagos atrasados si existen.
+- Boton aprobar si es solicitud pendiente.
+- Boton ver detalle.
+
+Seccion 4: Crear prestamo.
+Formulario con:
+- Selector de hijo.
+- Monto.
+- Motivo.
+- Fecha inicial o fecha de vencimiento.
+- Numero de cuotas.
+- Frecuencia: semanal, quincenal, mensual.
+- Switch con interes.
+- Modo de interes: porcentaje o fijo.
+- Tasa anual o monto fijo.
+- Resumen antes de enviar: total y cuota estimada.
+- Boton crear.
+
+Detalle de prestamo
+- Informacion general.
+- Tabla o lista de cuotas.
+- Cada cuota muestra numero, fecha, estado, capital, interes y total.
+- Historial de pagos.
+
+Actualizacion
+- Crear prestamo devuelve loan y remaining_balance si el padre lo ofrece.
+- Aprobar devuelve loan, remaining_balance, child_balance_cents y campos display.
+- Actualizar card con loan retornado.
+- Refrescar lista despues.

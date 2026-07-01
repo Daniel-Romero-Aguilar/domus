@@ -263,6 +263,8 @@ class SavingsBoxController extends Controller
 
             return [
                 'remaining_balance' => $balance->amount,
+                'remaining_balance_cents' => (int) $balance->amount,
+                'remaining_balance_display' => BalanceHelper::displayCents((int) $balance->amount),
                 'account' => $account->fresh(['user:id,name,username']),
             ];
         });
@@ -270,6 +272,10 @@ class SavingsBoxController extends Controller
         return response()->json([
             'message' => 'Abono guardado. Desde este momento cuenta para el rendimiento segun el tiempo que permanezca en la caja.',
             'data' => $payload,
+            'remaining_balance' => $payload['remaining_balance'],
+            'remaining_balance_cents' => $payload['remaining_balance_cents'],
+            'remaining_balance_display' => $payload['remaining_balance_display'],
+            'account' => $payload['account'],
         ]);
     }
 
@@ -377,6 +383,8 @@ class SavingsBoxController extends Controller
 
             return [
                 'remaining_balance' => $balance->amount,
+                'remaining_balance_cents' => (int) $balance->amount,
+                'remaining_balance_display' => BalanceHelper::displayCents((int) $balance->amount),
                 'account' => $account->fresh(['user:id,name,username']),
             ];
         });
@@ -384,6 +392,10 @@ class SavingsBoxController extends Controller
         return response()->json([
             'message' => 'Retiro guardado. El dinero retirado deja de generar rendimiento desde este momento.',
             'data' => $payload,
+            'remaining_balance' => $payload['remaining_balance'],
+            'remaining_balance_cents' => $payload['remaining_balance_cents'],
+            'remaining_balance_display' => $payload['remaining_balance_display'],
+            'account' => $payload['account'],
         ]);
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Balance;
 use App\Services\DomusAchievementService;
 use App\Services\DomusNotificationService;
+use App\Services\DomusPointsAccountService;
 use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Exceptions\HttpResponseException;
@@ -17,6 +18,7 @@ class BalanceController extends Controller
     public function __construct(
         private readonly DomusNotificationService $notifications,
         private readonly DomusAchievementService $achievements,
+        private readonly DomusPointsAccountService $pointsAccount,
     )
     {
     }
@@ -61,7 +63,7 @@ class BalanceController extends Controller
                 'Agregaste '.$this->notifications->money($amountCents).' a tu saldo.'
             );
 
-            $achievements = $this->achievements->unlockFirstDeposit($user->id, [
+            $unlockedBadges = $this->achievements->unlockFirstDeposit($user->id, [
                 'movement_type' => 'credit',
                 'amount_cents' => $amountCents,
                 'movement_id' => $movement->id,
@@ -69,20 +71,30 @@ class BalanceController extends Controller
 
             return [
                 'balance' => $balance->amount,
+                'balance_cents' => (int) $balance->amount,
+                'balance_display' => BalanceHelper::displayCents((int) $balance->amount),
                 'movement' => [
                     'id' => $movement->id,
                     'amount_added' => $movement->amount_added,
+                    'amount_added_display' => BalanceHelper::displayCents((int) $movement->amount_added),
                     'resulting_balance' => $movement->resulting_balance,
+                    'resulting_balance_display' => BalanceHelper::displayCents((int) $movement->resulting_balance),
                     'created_at' => $movement->created_at,
                 ],
-                'achievements' => $achievements,
+                'unlocked_badges' => $unlockedBadges,
+                'domus_points' => in_array($user->role, ['child', 'member'], true)
+                    ? $this->pointsAccount->snapshotForChild((int) $user->id)
+                    : null,
             ];
         });
 
         return response()->json([
             'message' => 'Balance updated.',
             'data' => $payload,
-            'achievements' => $payload['achievements'] ?? [],
+            'balance_cents' => $payload['balance_cents'],
+            'balance_display' => $payload['balance_display'],
+            'unlocked_badges' => $payload['unlocked_badges'] ?? [],
+            'domus_points' => $payload['domus_points'] ?? null,
         ]);
     }
 }

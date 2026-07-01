@@ -1,0 +1,42 @@
+DOMUS FLUTTER - MOVIMIENTOS RECIENTES
+
+Objetivo
+Mostrar actividad reciente en inicio y opcionalmente en una pantalla completa.
+
+Pantalla
+Nombre recomendado: NotificationsListPage si se implementa completa.
+Tambien se usa como widget en ParentHomePage y ChildHomePage.
+
+Endpoint
+- GET /api/notifications.
+
+Widget RecentActivityList
+Componentes:
+- Titulo: Ultimos movimientos.
+- Lista de NotificationItem.
+- Empty state.
+- Error state no bloqueante.
+
+NotificationItem
+Datos:
+- Categoria.
+- Seccion.
+- Texto.
+- Fecha.
+
+Categorias esperadas
+- saldo.
+- prestamos.
+- tareas.
+- mesadas.
+- cajas_ahorro.
+- dar_dinero.
+- retirar_dinero.
+- puntos.
+- educacion.
+
+Comportamiento
+- En home cargar con limit 6.
+- En pantalla completa cargar mas si se implementa paginacion.
+- Refrescar despues de acciones que crean movimientos.
+- Si falla, mostrar mensaje simple y dejar el resto de la pantalla funcionando.

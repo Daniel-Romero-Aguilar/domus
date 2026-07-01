@@ -1,0 +1,54 @@
+DOMUS FLUTTER - PANTALLA DAR DINERO PADRE
+
+Objetivo
+Padre entrega dinero virtual directo al saldo del hijo.
+
+Pantalla
+Nombre recomendado: ParentTransfersPage.
+
+Endpoints
+- GET /api/transfers.
+- POST /api/transfers.
+- GET /api/family-members.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Titulo: Dar dinero.
+- Texto: envia dinero directo a un integrante, sin intereses ni prestamo.
+- Mostrar dinero usado o entregado registrado si viene.
+
+Seccion 2: Pestanas.
+- Mis envios.
+- Dar dinero.
+
+Seccion 3: Mis envios.
+Cada TransferCard muestra:
+- Nombre del hijo.
+- Monto.
+- Estado.
+- Fecha.
+- Saldo del padre antes y despues si esta disponible.
+- Saldo del hijo antes y despues si esta disponible.
+- Aviso si fallo.
+
+Seccion 4: Seleccionar integrante.
+- Lista de hijos de loan_targets.
+- Cada item muestra nombre y username.
+- Si no hay integrantes, mostrar empty state y boton para ir a Usuarios.
+
+Seccion 5: Formulario de envio.
+- Nombre del integrante seleccionado.
+- Campo monto.
+- Texto de ayuda: ejemplo 100 significa $100.00.
+- Boton volver.
+- Boton dar dinero.
+
+Comportamiento
+- Generar Idempotency-Key por intento.
+- Deshabilitar boton mientras carga.
+- Si falla, generar nueva idempotency key antes de reintentar.
+
+Actualizacion
+- Usar transfer retornado para actualizar lista.
+- Usar remaining_parent_balance_display si viene.
+- Usar child_balance_display si viene para actualizar resumen del hijo si esta en memoria.

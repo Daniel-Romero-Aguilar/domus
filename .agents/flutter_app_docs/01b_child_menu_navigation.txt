@@ -1,0 +1,48 @@
+DOMUS FLUTTER - MENU DEL HIJO
+
+Objetivo
+Este documento describe el menu principal del hijo o integrante. Debe estar separado del menu del padre.
+
+Reglas Flutter
+- Crear ChildShell como contenedor principal del rol child/member.
+- No usar ParentShell con condicionales grandes.
+- El menu debe mostrar el nivel Domus del hijo cuando este disponible.
+- Cada opcion abre una pantalla propia del hijo.
+
+Datos base del menu
+- GET /api/me para nombre, rol y saldo base.
+- GET /api/child/domus-points para nivel actual.
+- Si el nivel no carga, mostrar "Sin nivel" sin bloquear la app.
+
+Opciones del menu hijo
+- Inicio.
+- Prestamos.
+- Cajas de ahorro.
+- Metas.
+- Retirar dinero.
+- Tareas.
+- Puntos Domus.
+- Educacion.
+
+Descripcion de cada opcion
+- Inicio abre ChildHomePage. Muestra resumen personal.
+- Prestamos abre ChildLoansPage. Permite solicitar, aceptar ofertas y pagar.
+- Cajas de ahorro abre ChildSavingsBoxesPage. Permite abonar y retirar si esta permitido.
+- Metas abre ChildGoalsPage. Permite crear metas, guardar y retirar dinero.
+- Retirar dinero abre ChildWithdrawalsPage. Permite pedir retiro fisico y aceptar solicitudes del padre.
+- Tareas abre ChildTasksPage. Permite aceptar y completar tareas.
+- Puntos Domus abre ChildDomusPointsPage. Muestra puntos, recompensas, canjes e insignias.
+- Educacion abre EducationCategoriesPage dentro del shell del hijo.
+
+Componentes del menu
+- UserHeader: logo o marca Domus, nombre del hijo y nivel actual.
+- LevelText: texto "Nivel X - Nombre" o "Sin nivel".
+- MenuItem: texto claro y estado activo.
+- LogoutButton: llama POST /api/logout y borra token local.
+- ContentSlot: area de contenido.
+
+Comportamiento
+- Si una accion gana puntos, actualizar LevelText con domus_points.level si viene en la respuesta.
+- Si una accion cambia saldo, actualizar el saldo global si la respuesta trae balance_cents o new_balance_cents.
+- El menu debe seguir funcionando aunque una pantalla falle.
+

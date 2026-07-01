@@ -1,0 +1,45 @@
+DOMUS FLUTTER - PANTALLA TAREAS HIJO
+
+Objetivo
+Hijo ve tareas disponibles, acepta tareas y pide revision al terminarlas.
+
+Pantalla
+Nombre recomendado: ChildTasksPage.
+
+Endpoints
+- GET /api/child/tasks.
+- POST /api/child/tasks/{task}/accept.
+- POST /api/tasks/member/completed/{task}.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Titulo: Tareas.
+- Texto: acepta tareas y gana recompensas.
+
+Seccion 2: Pestanas.
+- Disponibles.
+- Aceptadas.
+- Terminadas.
+
+Seccion 3: Lista de tareas.
+Cada TaskCard muestra:
+- Nombre.
+- Descripcion.
+- Recompensa en dinero.
+- Puntos Domus.
+- Estado.
+- Fecha limite si viene.
+- Nombre del padre si viene.
+- Boton aceptar en tareas abiertas.
+- Boton marcar completada en tareas aceptadas.
+- Aviso si esta esperando revision del padre.
+
+Estados vacios
+- Sin disponibles.
+- Sin aceptadas.
+- Sin terminadas.
+
+Actualizacion
+- Aceptar devuelve task. Mover la card a aceptadas.
+- Marcar completada devuelve task. Mostrar como esperando revision.
+- Refrescar GET /api/child/tasks despues.

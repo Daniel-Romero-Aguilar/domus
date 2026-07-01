@@ -138,13 +138,16 @@ class ChildGoalController extends Controller
             return [
                 'goal' => $this->presentGoal($goal->fresh()),
                 'balance_cents' => (int) $balance->amount,
-                'balance_display' => '$'.number_format(((int) $balance->amount) / 100, 2, '.', ','),
+                'balance_display' => BalanceHelper::displayCents((int) $balance->amount),
             ];
         });
 
         return response()->json([
             'message' => 'Dinero guardado en tu meta.',
             'data' => $payload,
+            'goal' => $payload['goal'],
+            'balance_cents' => $payload['balance_cents'],
+            'balance_display' => $payload['balance_display'],
         ]);
     }
 
@@ -206,13 +209,16 @@ class ChildGoalController extends Controller
             return [
                 'goal' => $this->presentGoal($goal->fresh()),
                 'balance_cents' => (int) $balance->amount,
-                'balance_display' => '$'.number_format(((int) $balance->amount) / 100, 2, '.', ','),
+                'balance_display' => BalanceHelper::displayCents((int) $balance->amount),
             ];
         });
 
         return response()->json([
             'message' => 'Dinero retirado de tu meta.',
             'data' => $payload,
+            'goal' => $payload['goal'],
+            'balance_cents' => $payload['balance_cents'],
+            'balance_display' => $payload['balance_display'],
         ]);
     }
 
@@ -289,13 +295,16 @@ class ChildGoalController extends Controller
             return [
                 'goal' => $this->presentGoal($goal->fresh()),
                 'balance_cents' => (int) $balance->amount,
-                'balance_display' => '$'.number_format(((int) $balance->amount) / 100, 2, '.', ','),
+                'balance_display' => BalanceHelper::displayCents((int) $balance->amount),
             ];
         });
 
         return response()->json([
             'message' => 'Meta cancelada y dinero devuelto a tu saldo.',
             'data' => $payload,
+            'goal' => $payload['goal'],
+            'balance_cents' => $payload['balance_cents'],
+            'balance_display' => $payload['balance_display'],
         ]);
     }
 
@@ -312,9 +321,9 @@ class ChildGoalController extends Controller
             'name' => $goal->name,
             'description' => $goal->description,
             'target_amount_cents' => $targetAmountCents,
-            'target_amount_display' => $targetAmountCents === null ? null : '$'.number_format($targetAmountCents / 100, 2, '.', ','),
+            'target_amount_display' => $targetAmountCents === null ? null : BalanceHelper::displayCents($targetAmountCents),
             'saved_amount_cents' => $savedAmountCents,
-            'saved_amount_display' => '$'.number_format($savedAmountCents / 100, 2, '.', ','),
+            'saved_amount_display' => BalanceHelper::displayCents($savedAmountCents),
             'status' => $goal->status,
             'progress_percent' => $progressPercent,
             'can_complete' => $goal->status === 'active' && ($targetAmountCents === null || $savedAmountCents >= $targetAmountCents),

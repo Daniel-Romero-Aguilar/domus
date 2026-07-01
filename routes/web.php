@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AdminAuthController;
+use App\Http\Controllers\AdminBadgeController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -19,6 +20,7 @@ Route::view('/parent/domus-points', 'auth-parent-domus-points');
 Route::view('/child/domus-points', 'auth-child-domus-points');
 Route::view('/levels', 'auth-child-levels');
 Route::view('/parent/transfers', 'auth-parent-transfers');
+Route::view('/parent/withdrawals', 'auth-parent-withdrawals');
 Route::view('/account/education', 'auth-account-education');
 Route::get('/account/education/categories/{category}/courses', fn () => view('auth-account-education-courses'));
 Route::get('/account/education/courses/{course}', fn () => view('auth-account-education-course'));
@@ -28,10 +30,16 @@ Route::view('/parent/savings-boxes', 'auth-parent-savings-boxes');
 Route::view('/child/savings-boxes', 'auth-child-savings-boxes');
 Route::view('/member/savings-boxes', 'auth-child-savings-boxes');
 Route::view('/child/goals', 'auth-child-goals');
+Route::view('/child/withdrawals', 'auth-child-withdrawals');
+Route::view('/member/withdrawals', 'auth-child-withdrawals');
 Route::view('/member/goals', 'auth-child-goals');
 Route::view('/member/loans', 'auth-member-loans');
 Route::view('/parent/tasks', 'auth-parent-tasks');
 Route::view('/child/tasks', 'auth-child-tasks');
+
+Route::get('/badges/{badge:slug}/image', [AdminBadgeController::class, 'showImage'])
+    ->middleware('throttle:120,1')
+    ->name('badges.image');
 
 Route::middleware([
     'auth:sanctum',
@@ -50,9 +58,8 @@ Route::prefix('admin')->group(function () {
     });
 
     Route::middleware('auth:admin_web')->group(function () {
-        Route::get('/dashboard', function () {
-            return view('admin-dashboard');
-        })->name('admin.dashboard');
+        Route::get('/dashboard', [AdminBadgeController::class, 'dashboard'])->name('admin.dashboard');
+        Route::post('/badges/{badge}/image', [AdminBadgeController::class, 'updateImage'])->name('admin.badges.image.update');
         Route::post('/logout', [AdminAuthController::class, 'logout'])->name('admin.logout');
     });
 });

@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\DomusMission;
 use App\Models\DomusReward;
 use App\Models\DomusRewardRedemption;
 use App\Models\FamilyMember;
@@ -11,6 +10,7 @@ use App\Models\Task;
 use App\Services\DomusAchievementService;
 use App\Services\EducationExamRewardService;
 use App\Services\DomusLevelService;
+use App\Services\DomusPointsAccountService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +21,7 @@ class DomusPointsController extends Controller
         private readonly DomusAchievementService $achievements,
         private readonly EducationExamRewardService $examRewards,
         private readonly DomusLevelService $levels,
+        private readonly DomusPointsAccountService $pointsAccount,
     )
     {
     }
@@ -44,8 +45,9 @@ class DomusPointsController extends Controller
                     return null;
                 }
 
-                $historical = $this->earnedPointsForChild($parent->id, $child->id);
-                $spent = $this->spentPointsForChild($child->id);
+                $snapshot = $this->pointsAccount->snapshotForChild((int) $child->id);
+                $historical = (int) $snapshot['points']['historical'];
+                $spent = (int) $snapshot['points']['spent'];
 
                 return [
                     'user_id' => $child->id,
@@ -55,7 +57,7 @@ class DomusPointsController extends Controller
                     'earned_points' => $historical,
                     'spent_points' => $spent,
                     'available_points' => max($historical - $spent, 0),
-                    'level' => $this->levels->resolveForPoints($historical),
+                    'level' => $snapshot['level'],
                 ];
             })
             ->filter()
@@ -142,17 +144,18 @@ class DomusPointsController extends Controller
                     'available' => 0,
                 ],
                 'level' => null,
-                'missions' => [],
+                'badges' => [],
                 'rewards' => [],
                 'redemptions' => [],
             ]);
         }
 
-        $earned = $this->earnedPointsForChild($familyMember->parent_user_id, $child->id);
-        $spent = $this->spentPointsForChild($child->id);
-        $available = max($earned - $spent, 0);
-        $missions = $this->achievements->missionsForUser($child->id);
-        $level = $this->levels->resolveForPoints($earned);
+        $snapshot = $this->pointsAccount->snapshotForChild((int) $child->id);
+        $earned = (int) $snapshot['points']['earned'];
+        $spent = (int) $snapshot['points']['spent'];
+        $available = (int) $snapshot['points']['available'];
+        $badges = $this->achievements->badgesForUser($child->id);
+        $level = $snapshot['level'];
 
         $rewards = DomusReward::query()
             ->where('parent_user_id', $familyMember->parent_user_id)
@@ -194,7 +197,7 @@ class DomusPointsController extends Controller
                 'available' => $available,
             ],
             'level' => $level,
-            'missions' => $missions,
+            'badges' => $badges,
             'rewards' => $rewards,
             'redemptions' => $redemptions,
         ]);
@@ -229,9 +232,8 @@ class DomusPointsController extends Controller
             return response()->json(['message' => 'Reward not available for this child.'], 403);
         }
 
-        $earned = $this->earnedPointsForChild($familyMember->parent_user_id, $child->id);
-        $spent = $this->spentPointsForChild($child->id);
-        $available = max($earned - $spent, 0);
+        $snapshot = $this->pointsAccount->snapshotForChild((int) $child->id);
+        $available = (int) $snapshot['points']['available'];
 
         if ($available < $reward->points_cost) {
             return response()->json(['message' => 'Not enough Domus points.'], 422);
@@ -249,6 +251,7 @@ class DomusPointsController extends Controller
         return response()->json([
             'message' => 'Reward redeemed.',
             'redemption' => $redemption,
+            'domus_points' => $this->pointsAccount->snapshotForChild((int) $child->id),
         ], 201);
     }
 

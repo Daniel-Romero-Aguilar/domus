@@ -1,0 +1,46 @@
+DOMUS FLUTTER - PANTALLA MESADAS PADRE
+
+Objetivo
+Padre programa y ejecuta pagos recurrentes a hijos.
+
+Pantalla
+Nombre recomendado: ParentAllowancesPage.
+
+Endpoints
+- GET /api/allowances.
+- POST /api/allowances.
+- POST /api/allowances/{allowance}/execute.
+- GET /api/family-members.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Titulo: Mesadas.
+- Texto: programa pagos recurrentes para tus integrantes.
+- Resumen de pagos pendientes si summary lo trae.
+
+Seccion 2: Lista de mesadas.
+Cada AllowanceCard muestra:
+- Nombre del hijo.
+- Monto.
+- Frecuencia.
+- Fecha de inicio.
+- Proxima ejecucion.
+- Ultima ejecucion.
+- Estado.
+- Pagos vencidos pendientes.
+- Boton ejecutar si hay pagos pendientes o se permite manual.
+
+Seccion 3: Crear mesada.
+Formulario con:
+- Selector de hijo.
+- Monto.
+- Frecuencia: diaria, semanal, mensual o prueba tecnica si existe.
+- Switch primer pago inmediato.
+- Fecha de inicio si no es inmediato.
+- Boton crear.
+
+Actualizacion
+- Crear devuelve allowance y result.
+- Ejecutar devuelve allowance, payment, remaining_parent_balance_display y child_balance_display.
+- Actualizar card con allowance retornada.
+- Actualizar resumen del padre con remaining_parent_balance_display.

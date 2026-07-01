@@ -8,6 +8,7 @@ use App\Models\FamilyMember;
 use App\Models\Task;
 use App\Services\DomusAchievementService;
 use App\Services\DomusNotificationService;
+use App\Services\DomusPointsAccountService;
 use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,7 @@ class TaskController extends Controller
     public function __construct(
         private readonly DomusNotificationService $notifications,
         private readonly DomusAchievementService $achievements,
+        private readonly DomusPointsAccountService $pointsAccount,
     )
     {
     }
@@ -46,6 +48,7 @@ class TaskController extends Controller
         return response()->json([
             'tasks' => $tasks,
             'available_balance_cents' => BalanceHelper::parentMoneyUsedCents($parent),
+            'available_balance_display' => BalanceHelper::displayCents(BalanceHelper::parentMoneyUsedCents($parent)),
         ]);
     }
 
@@ -64,6 +67,8 @@ class TaskController extends Controller
             'description' => ['nullable', 'string', 'max:255'],
             'reward_amount' => ['required', 'integer', 'min:0'],
             'reward_points' => ['required', 'integer', 'min:0', 'max:100'],
+        ], [
+            'reward_points.max' => 'El maximo de puntos Domus por tarea es 100.',
         ]);
 
         $payload = DB::transaction(function () use ($parent, $validated) {
@@ -115,6 +120,7 @@ class TaskController extends Controller
             return [
                 'task' => $task,
                 'available_balance_cents' => $parentMoneyUsedAfter,
+                'available_balance_display' => BalanceHelper::displayCents($parentMoneyUsedAfter),
             ];
         });
 
@@ -126,6 +132,7 @@ class TaskController extends Controller
             'message' => 'Task created.',
             'task' => $payload['task'],
             'available_balance_cents' => $payload['available_balance_cents'],
+            'available_balance_display' => $payload['available_balance_display'],
         ], 201);
     }
 
@@ -295,14 +302,14 @@ class TaskController extends Controller
 
             return [
                 'task' => $task,
-                'achievements' => [],
+                'unlocked_badges' => [],
             ];
         });
 
         return response()->json([
             'message' => 'Completion request sent to parent/admin.',
             'task' => $payload['task'],
-            'achievements' => $payload['achievements'],
+            'unlocked_badges' => $payload['unlocked_badges'],
         ]);
     }
 
@@ -378,15 +385,20 @@ class TaskController extends Controller
                     'Confirmaste la tarea '.$task->name.'.'
                 );
 
+                $unlockedBadges = $this->achievements->unlockFirstTaskCompletion($task->accepted_by_user_id, [
+                    'task_id' => $task->id,
+                    'task_name' => $task->name,
+                ]);
+
                 return [
                     'message' => 'Task confirmed.',
                     'task' => $task,
                     'available_balance_cents' => null,
+                    'available_balance_display' => null,
                     'available_child_balance_cents' => (int) $childBalance->amount,
-                    'achievements' => $this->achievements->unlockFirstTaskCompletion($task->accepted_by_user_id, [
-                        'task_id' => $task->id,
-                        'task_name' => $task->name,
-                    ]),
+                    'available_child_balance_display' => BalanceHelper::displayCents((int) $childBalance->amount),
+                    'unlocked_badges' => $unlockedBadges,
+                    'domus_points' => $this->pointsAccount->snapshotForChild((int) $task->accepted_by_user_id),
                 ];
             }
 
@@ -416,8 +428,11 @@ class TaskController extends Controller
                     'message' => 'Task returned for retry.',
                     'task' => $task,
                     'available_balance_cents' => null,
+                    'available_balance_display' => null,
                     'available_child_balance_cents' => null,
-                    'achievements' => [],
+                    'available_child_balance_display' => null,
+                    'unlocked_badges' => [],
+                    'domus_points' => null,
                 ];
             }
 
@@ -476,8 +491,11 @@ class TaskController extends Controller
                 'message' => 'Task canceled.',
                 'task' => $task,
                 'available_balance_cents' => $parentMoneyUsedAfter,
+                'available_balance_display' => BalanceHelper::displayCents($parentMoneyUsedAfter),
                 'available_child_balance_cents' => null,
-                'achievements' => [],
+                'available_child_balance_display' => null,
+                'unlocked_badges' => [],
+                'domus_points' => null,
             ];
         });
 

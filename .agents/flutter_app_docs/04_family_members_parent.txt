@@ -1,0 +1,55 @@
+DOMUS FLUTTER - PANTALLA USUARIOS PADRE
+
+Objetivo
+Permitir al padre ver, crear y abrir detalle de hijos o integrantes.
+
+Pantallas
+- ParentFamilyMembersPage.
+- ParentCreateMemberPage o formulario modal.
+- ParentMemberDetailPage.
+
+Endpoints
+- GET /api/family-members.
+- GET /api/family-members-summary.
+- GET /api/family-members/{user}/summary.
+- POST /api/family-members.
+
+ParentFamilyMembersPage
+Seccion 1: Encabezado.
+- Titulo: Usuarios.
+- Texto: administra los integrantes de tu familia.
+- Boton: Crear usuario.
+
+Seccion 2: Lista de usuarios.
+- Card por integrante.
+- Mostrar nombre.
+- Mostrar username.
+- Mostrar si es menor de edad o adulto.
+- Mostrar rol child o member.
+- Mostrar saldo si viene en la respuesta.
+- Mostrar deuda si viene en summary.
+- Boton o area tocable: Ver detalle.
+
+Seccion 3: Empty state.
+- Texto: Todavia no has creado miembros familiares.
+- Boton: Crear primer usuario.
+
+Crear usuario
+- Campo nombre.
+- Campo username.
+- Campo password.
+- Campo confirmar password.
+- Selector menor de edad.
+- Checkbox declaracion de tutor si es menor.
+- Boton crear.
+- Mensaje de exito o error.
+
+Detalle de usuario
+- Encabezado con nombre y username.
+- Tarjetas: saldo, deuda, puntos Domus y nivel si viene.
+- Lista de prestamos del usuario.
+- Accesos rapidos a prestar, dar dinero, retirar dinero o tareas para ese usuario si se implementa.
+
+Actualizacion
+- Al crear usuario, usar member retornado y refrescar lista.
+- Si la API devuelve balance_display, mostrarlo directamente.

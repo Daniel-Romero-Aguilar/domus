@@ -120,7 +120,7 @@ class EducationExamRewardService
 
         if (! $rule) {
             return [
-                'grant' => null,
+                'grants' => collect(),
                 'achievements' => [],
             ];
         }

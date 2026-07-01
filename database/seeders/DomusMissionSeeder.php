@@ -11,37 +11,37 @@ class DomusMissionSeeder extends Seeder
     {
         $now = now();
 
-        $missions = [
+        $badges = [
             [
                 'slug' => 'primer-abono',
-                'title' => 'Primer abono',
-                'description' => 'Recibe tu primer abono y da tu primer paso en tu historial financiero.',
+                'title' => 'Insignia de primer abono',
+                'description' => 'Gana esta insignia al recibir tu primer abono y dar tu primer paso en tu historial financiero.',
                 'points_reward' => 5,
                 'sort_order' => 1,
                 'is_active' => true,
             ],
             [
                 'slug' => 'primer-pago-prestamo',
-                'title' => 'Primer pago de prestamo',
-                'description' => 'Haz tu primer pago de prestamo y demuestra constancia con tus compromisos.',
+                'title' => 'Insignia de primer pago de prestamo',
+                'description' => 'Gana esta insignia al hacer tu primer pago de prestamo y demostrar constancia con tus compromisos.',
                 'points_reward' => 5,
                 'sort_order' => 2,
                 'is_active' => true,
             ],
             [
                 'slug' => 'primera-tarea-completada',
-                'title' => 'Primera tarea completada',
-                'description' => 'Completa tu primera tarea familiar para ganar tus primeros puntos Domus.',
+                'title' => 'Insignia de primera tarea completada',
+                'description' => 'Gana esta insignia al completar tu primera tarea familiar.',
                 'points_reward' => 5,
                 'sort_order' => 3,
                 'is_active' => true,
             ],
         ];
 
-        foreach ($missions as $mission) {
+        foreach ($badges as $badge) {
             DB::table('domus_missions')->updateOrInsert(
-                ['slug' => $mission['slug']],
-                $mission + ['created_at' => $now, 'updated_at' => $now]
+                ['slug' => $badge['slug']],
+                $badge + ['created_at' => $now, 'updated_at' => $now]
             );
         }
     }

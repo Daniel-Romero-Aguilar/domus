@@ -1,5 +1,13 @@
 DOMUS API ENDPOINTS
 
+Flutter usage notes
+- Use this as raw endpoint base.
+- Use .agents/flutter_app_docs/00_general_flutter_plan.txt as architecture base.
+- Then pass one screen TXT from .agents/flutter_app_docs per Flutter task.
+- Parent and child/member screens should be separate pages/providers, not one giant role-conditional page.
+- After POST actions, update UI with the returned entity/balance first, then refresh the list if needed.
+- If an action returns unlocked_badges, show a badge earned modal/toast.
+
 Auth
 POST /api/register
 Body: name, email, password, password_confirmation, terms_accepted
@@ -13,12 +21,17 @@ GET /api/me
 Auth: bearer token
 Returns: user, parent_admin_name, is_family_member
 
+GET /api/user
+Auth: bearer token
+Returns: user
+
 POST /api/logout
 Auth: bearer token
 Returns: message
 
 GET /api/notifications
 Auth: bearer token
+Query optional: limit
 Returns: notifications
 
 Domus points
@@ -28,24 +41,24 @@ Returns: levels
 
 GET /api/parent/domus-points
 Auth: parent
-Returns: summary, rewards, redemptions
+Returns: members(user_id, name, role, historical_points, earned_points, spent_points, available_points, level), rewards, redemptions
 
 POST /api/parent/domus-points/rewards
 Auth: parent
-Body: title, description, points, child_user_id, available_from, expires_at
-Returns: reward
+Body: title, description, points_cost
+Returns: message, reward
 
 POST /api/parent/domus-points/redemptions/{redemption}/pay
 Auth: parent
-Returns: redemption
+Returns: message, redemption
 
 GET /api/child/domus-points
 Auth: child/member
-Returns: points, rewards, redemptions
+Returns: points, level, badges(id, slug, title, description, image_url, points_reward, is_completed), rewards, redemptions
 
 POST /api/child/domus-points/rewards/{reward}/redeem
 Auth: child/member
-Returns: redemption
+Returns: message, redemption, domus_points(points, level)
 
 Goals
 GET /api/child/goals
@@ -54,18 +67,18 @@ Returns: goals, balance_cents, balance_display
 
 POST /api/child/goals
 Auth: child/member
-Body: name, description, target_amount
+Body: name, description, target_amount optional
 Returns: goal
 
 POST /api/child/goals/{goal}/deposit
 Auth: child/member
 Body: amount
-Returns: goal, balance
+Returns: goal, balance_cents, balance_display
 
 POST /api/child/goals/{goal}/withdraw
 Auth: child/member
 Body: amount
-Returns: goal, balance
+Returns: goal, balance_cents, balance_display
 
 POST /api/child/goals/{goal}/complete
 Auth: child/member
@@ -73,13 +86,13 @@ Returns: goal
 
 POST /api/child/goals/{goal}/cancel
 Auth: child/member
-Returns: goal, balance
+Returns: goal, balance_cents, balance_display
 
 Balance
 POST /api/balance/add
 Auth: bearer token
 Body: amount
-Returns: balance, movement, achievements
+Returns: balance_cents, balance_display, movement, unlocked_badges(id, slug, title, description, image_url, points_reward), domus_points
 
 Transfers
 GET /api/transfers
@@ -90,7 +103,30 @@ POST /api/transfers
 Auth: parent
 Header: Idempotency-Key
 Body: child_user_id, amount
-Returns: transfer, remaining_parent_balance
+Returns: transfer, remaining_parent_balance, remaining_parent_balance_display, child_balance_cents, child_balance_display
+
+Cash withdrawals
+GET /api/withdrawals
+Auth: parent or child/member
+Returns: withdrawals, requests, all
+
+POST /api/parent/withdrawals
+Auth: parent
+Body: child_user_id, amount
+Returns: withdrawal, child_balance(balance_cents, balance_display)
+
+POST /api/child/withdrawals
+Auth: child/member
+Body: amount
+Returns: withdrawal, child_balance(balance_cents, balance_display)
+
+POST /api/withdrawals/{cashWithdrawal}/accept
+Auth: pending side only
+Returns: withdrawal, child_balance(balance_cents, balance_display)
+
+POST /api/withdrawals/{cashWithdrawal}/cancel
+Auth: parent or child/member in withdrawal
+Returns: withdrawal, child_balance(balance_cents, balance_display)
 
 Family members
 GET /api/family-members
@@ -118,11 +154,11 @@ Returns: allowances, summary
 POST /api/allowances
 Auth: parent
 Body: child_user_id, amount, frequency, first_payment_immediate, start_at
-Returns: allowance, result
+Returns: allowance, result, balances inside result when executed
 
 POST /api/allowances/{allowance}/execute
 Auth: parent
-Returns: execution result
+Returns: execution result, remaining_parent_balance_display, child_balance_display
 
 Savings boxes
 GET /api/savings-boxes
@@ -137,12 +173,12 @@ Returns: savings_box
 POST /api/savings-boxes/{savingsBox}/deposit
 Auth: child/member
 Body: amount
-Returns: remaining_balance, account
+Returns: account, remaining_balance_cents, remaining_balance_display
 
 POST /api/savings-boxes/{savingsBox}/withdraw
 Auth: child/member
 Body: amount
-Returns: remaining_balance, account
+Returns: account, remaining_balance_cents, remaining_balance_display
 
 Loans
 GET /api/loans
@@ -155,25 +191,25 @@ Returns: loans
 
 GET /api/loans/active-total
 Auth: parent
-Returns: total_active_loans, estimated_total_paid, interest_generated_this_month, interest_generated_historical, currency
+Returns: total_active_loans, estimated_total_paid_cents, estimated_total_paid_display, interest_generated_this_month_cents, interest_generated_this_month_display, interest_generated_historical_cents, interest_generated_historical_display, currency
 
 POST /api/loans
 Auth: parent or child/member
 Body: child_user_id, amount, reason, due_date, installments_count, installment_frequency, has_interest, interest_mode, annual_interest_rate, fixed_interest_amount
-Returns: loan
+Returns: message, loan, remaining_balance and remaining_balance_display when parent creates an offer
 
 POST /api/loans/{loan}/approve
 Auth: parent
-Returns: loan, remaining_balance
+Returns: message, loan, remaining_balance, remaining_balance_display, child_balance_cents, child_balance_display
 
 POST /api/loans/{loan}/respond
 Auth: child/member
-Body: action, reason
-Returns: loan, member_balance_cents
+Body: action accept/reject, reason required when reject
+Returns: message, loan, member_balance_cents, member_balance_display
 
 POST /api/loan-payments/{loanPayment}/pay
 Auth: child/member
-Returns: payment, loan, member_balance_cents, new_balance_cents, achievements
+Returns: message, payment, loan, member_balance_cents, member_balance_display, new_balance_cents, new_balance_display, parent_balance_cents, parent_balance_display, unlocked_badges(id, slug, title, description, image_url, points_reward), domus_points
 
 Education
 GET /api/education/categories
@@ -190,27 +226,27 @@ Returns: course
 
 POST /api/education/lessons/{lesson}/complete
 Auth: bearer token
-Returns: message
+Returns: message, lesson_completion, progress
 
 POST /api/education/lesson-parts/{lessonPart}/submit
 Auth: bearer token
-Body: answer fields depend on lesson part
-Returns: result
+Body: answers[] with question_uuid and answer
+Returns: message, assessment_uuid, assessment_type, score, total_questions, percentage, saved, last_result, reward, achievements, domus_points for exams
 
 Tasks
 GET /api/parent/tasks
 Auth: parent
-Returns: tasks
+Returns: tasks, available_balance_cents, available_balance_display
 
 POST /api/parent/tasks
 Auth: parent
-Body: title, description, reward_points, child_user_id, due_date, etc.
-Returns: task
+Body: name, description, reward_amount, reward_points
+Returns: task, available_balance_cents, available_balance_display
 
 POST /api/parent/tasks/{task}/review
 Auth: parent
-Body: action, note/reason if needed
-Returns: task
+Body: action approve/retry/cancel
+Returns: message, task, available_balance_cents, available_balance_display when parent balance changed, available_child_balance_cents, available_child_balance_display when child balance changed, unlocked_badges(id, slug, title, description, image_url, points_reward), domus_points when points changed
 
 GET /api/child/tasks
 Auth: child/member
@@ -222,4 +258,4 @@ Returns: task
 
 POST /api/tasks/member/completed/{task}
 Auth: child/member
-Returns: task
+Returns: task, unlocked_badges

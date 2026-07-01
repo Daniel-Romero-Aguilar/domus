@@ -10,6 +10,7 @@ use App\Models\Loan;
 use App\Models\LoanPayment;
 use App\Services\DomusAchievementService;
 use App\Services\DomusNotificationService;
+use App\Services\DomusPointsAccountService;
 use App\Services\LoanPaymentService;
 use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
@@ -24,6 +25,7 @@ class LoanController extends Controller
         private readonly DomusNotificationService $notifications,
         private readonly DomusAchievementService $achievements,
         private readonly LoanPaymentService $loanPayments,
+        private readonly DomusPointsAccountService $pointsAccount,
     )
     {
     }
@@ -157,8 +159,14 @@ class LoanController extends Controller
         return response()->json([
             'total_active_loans' => $loans->count(),
             'estimated_total_paid' => $paidTotalCents / 100,
+            'estimated_total_paid_cents' => $paidTotalCents,
+            'estimated_total_paid_display' => BalanceHelper::displayCents($paidTotalCents),
             'interest_generated_this_month' => $interestGeneratedThisMonthCents / 100,
+            'interest_generated_this_month_cents' => $interestGeneratedThisMonthCents,
+            'interest_generated_this_month_display' => BalanceHelper::displayCents($interestGeneratedThisMonthCents),
             'interest_generated_historical' => $interestGeneratedHistoricalCents / 100,
+            'interest_generated_historical_cents' => $interestGeneratedHistoricalCents,
+            'interest_generated_historical_display' => BalanceHelper::displayCents($interestGeneratedHistoricalCents),
             'currency' => 'MXN',
             'meta' => [
                 'is_estimated' => false,
@@ -284,7 +292,7 @@ class LoanController extends Controller
 
             return response()->json([
                 'message' => 'Loan request submitted and pending approval.',
-                'loan' => $loan,
+                'loan' => $this->presentLoan($loan),
             ], 201);
         }
 
@@ -358,8 +366,9 @@ class LoanController extends Controller
 
             return response()->json([
                 'message' => 'Loan offer created successfully.',
-                'loan' => $payload['loan'],
+                'loan' => $this->presentLoan($payload['loan']),
                 'remaining_balance' => $payload['remaining_balance'],
+                'remaining_balance_display' => BalanceHelper::displayCents((int) $payload['remaining_balance']),
             ], 201);
         }
 
@@ -383,7 +392,7 @@ class LoanController extends Controller
 
         return response()->json([
             'message' => 'Loan request submitted and pending approval.',
-            'loan' => $loan,
+            'loan' => $this->presentLoan($loan),
         ], 201);
     }
 
@@ -483,6 +492,7 @@ class LoanController extends Controller
                 return [
                     'loan' => $loan,
                     'remaining_balance' => $parentMoneyUsedAfter,
+                    'child_balance_cents' => (int) $childBalance->amount,
                 ];
             });
         } catch (\RuntimeException $exception) {
@@ -493,7 +503,14 @@ class LoanController extends Controller
             throw $exception;
         }
 
-        return response()->json(['message' => 'Loan approved.', 'loan' => $payload['loan'], 'remaining_balance' => $payload['remaining_balance']]);
+        return response()->json([
+            'message' => 'Loan approved.',
+            'loan' => $this->presentLoan($payload['loan']),
+            'remaining_balance' => $payload['remaining_balance'],
+            'remaining_balance_display' => BalanceHelper::displayCents((int) $payload['remaining_balance']),
+            'child_balance_cents' => $payload['child_balance_cents'],
+            'child_balance_display' => BalanceHelper::displayCents((int) $payload['child_balance_cents']),
+        ]);
     }
 
     public function respondToOffer(Request $request, Loan $loan): JsonResponse
@@ -624,6 +641,7 @@ class LoanController extends Controller
             'message' => $validated['action'] === 'accept' ? 'Loan accepted.' : 'Loan rejected.',
             'loan' => $this->presentLoan($result['loan']->loadMissing(['payments' => fn ($query) => $query->orderBy('installment_number')])),
             'member_balance_cents' => $result['member_balance_cents'],
+            'member_balance_display' => BalanceHelper::displayCents((int) $result['member_balance_cents']),
         ]);
     }
 
@@ -683,7 +701,7 @@ class LoanController extends Controller
             );
         }
 
-        $achievements = $this->achievements->unlockFirstLoanPayment($member->id, [
+        $unlockedBadges = $this->achievements->unlockFirstLoanPayment($member->id, [
             'loan_id' => $loan->id,
             'loan_payment_id' => $payment->id,
             'installment_number' => $payment->installment_number,
@@ -695,7 +713,12 @@ class LoanController extends Controller
             'loan' => $this->presentLoan($loan),
             'member_balance_cents' => $result['member_balance_cents'],
             'new_balance_cents' => $result['member_balance_cents'],
-            'achievements' => $achievements,
+            'member_balance_display' => BalanceHelper::displayCents((int) $result['member_balance_cents']),
+            'new_balance_display' => BalanceHelper::displayCents((int) $result['member_balance_cents']),
+            'parent_balance_cents' => $result['parent_balance_cents'],
+            'parent_balance_display' => BalanceHelper::displayCents((int) $result['parent_balance_cents']),
+            'unlocked_badges' => $unlockedBadges,
+            'domus_points' => $this->pointsAccount->snapshotForChild((int) $member->id),
         ]);
     }
 

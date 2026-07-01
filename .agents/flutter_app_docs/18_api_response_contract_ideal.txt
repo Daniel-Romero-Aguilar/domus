@@ -1,0 +1,275 @@
+DOMUS FLUTTER - CONTRATO DE RESPUESTAS API
+
+Que es este documento
+Este archivo no reemplaza a .agents/domus_api_endpoints.txt.
+El archivo de endpoints dice que ruta existe, que recibe y que devuelve.
+Este archivo dice como debe usar Flutter esas respuestas para mantener la UI actualizada sin recargar todo cada vez.
+
+Regla central
+Despues de cada POST, Flutter debe aplicar primero la respuesta directa de Laravel. Luego puede refrescar la lista del modulo para confirmar consistencia.
+
+Reglas generales
+- Si la API devuelve message, mostrarlo como feedback de exito o error.
+- Si devuelve una entidad creada o actualizada, reemplazar esa entidad en la lista local.
+- Si devuelve balance_cents y balance_display, actualizar el saldo visible de ese usuario.
+- Si devuelve child_balance, actualizar el saldo del hijo afectado.
+- Si devuelve member_balance_cents o new_balance_cents, actualizar el saldo del hijo/integrante logueado.
+- Si devuelve parent_balance_cents o remaining_parent_balance, actualizar saldos/resumen del padre.
+- Si devuelve domus_points, actualizar puntos disponibles, historicos, gastados y nivel.
+- Si devuelve unlocked_badges, mostrar modal/toast de insignia ganada.
+- Si Laravel responde 401, borrar token local y volver a Login.
+- Si Laravel responde 422, mostrar errores de validacion por campo si vienen en errors.
+
+Formato de dinero
+- Para mostrar dinero usar campos *_display.
+- Para logica interna usar campos *_cents.
+- No calcular saldos sensibles en Flutter si la API ya devuelve el nuevo saldo.
+- Si una respuesta no trae nuevo saldo, refrescar el endpoint principal de la pantalla.
+
+Formato domus_points
+- domus_points.points.historical.
+- domus_points.points.earned.
+- domus_points.points.spent.
+- domus_points.points.available.
+- domus_points.level.
+
+Auth
+POST /api/login y POST /api/register devuelven token y user.
+Flutter guarda token seguro y luego pide GET /api/me para decidir shell.
+
+GET /api/me devuelve user, parent_admin_name e is_family_member.
+Flutter usa user.role para abrir ParentShell o ChildShell.
+Si user.balance_display existe, sirve como saldo inicial del hijo/integrante.
+
+POST /api/logout devuelve message.
+Flutter borra token local y vuelve a Login aunque el message no llegue.
+
+Notificaciones
+GET /api/notifications devuelve notifications.
+Flutter las usa en Home y actividad reciente.
+No modifican saldos; solo se reemplaza la lista local.
+
+Home padre
+Endpoints usados:
+- GET /api/me.
+- GET /api/family-members-summary.
+- GET /api/loans.
+- GET /api/loans/active-total.
+- GET /api/notifications?limit=6.
+
+Estado que actualiza:
+- Nombre del padre desde me.user.name.
+- Dinero usado desde me.user.balance_display o resumen calculado.
+- Usuarios desde members.
+- Prestamos desde loans.
+- Totales de prestamos desde active-total.
+- Movimientos recientes desde notifications.
+
+Home hijo
+Endpoints usados:
+- GET /api/me.
+- GET /api/loans.
+- GET /api/savings-boxes.
+- GET /api/child/goals.
+- GET /api/child/domus-points.
+- GET /api/notifications?limit=6.
+
+Estado que actualiza:
+- Saldo desde me.user.balance_display.
+- Deuda desde loans.payment_summary.
+- Ahorros desde savings_boxes y goals.
+- Puntos y nivel desde child/domus-points.
+- Movimientos recientes desde notifications.
+
+Usuarios familiares
+POST /api/family-members devuelve member.
+Flutter inserta member en la lista de integrantes y despues refresca GET /api/family-members.
+Este dato desbloquea selects de hijo en prestamos, dar dinero, retiros, mesadas y cajas.
+
+Dar dinero
+POST /api/transfers devuelve transfer, remaining_parent_balance, remaining_parent_balance_display, child_balance_cents y child_balance_display.
+Flutter agrega transfer a la lista.
+Flutter actualiza el resumen del padre con remaining_parent_balance_display.
+Flutter actualiza el saldo del hijo elegido con child_balance_display si ese hijo esta visible.
+
+Retirar dinero
+GET /api/withdrawals devuelve withdrawals, requests y all.
+Flutter muestra dos listas: iniciados por mi y solicitudes que debo aceptar.
+
+POST /api/parent/withdrawals devuelve withdrawal y child_balance.
+Flutter agrega withdrawal a la lista de retiros del padre.
+Flutter actualiza saldo del hijo con child_balance.balance_display.
+
+POST /api/child/withdrawals devuelve withdrawal y child_balance.
+Flutter agrega withdrawal a la lista del hijo.
+Flutter actualiza saldo del hijo logueado con child_balance.balance_display.
+
+POST /api/withdrawals/{cashWithdrawal}/accept devuelve withdrawal y child_balance.
+Flutter reemplaza withdrawal por el devuelto.
+Si status queda completed, moverlo fuera de solicitudes pendientes.
+Actualizar saldo del hijo con child_balance.balance_display.
+
+POST /api/withdrawals/{cashWithdrawal}/cancel devuelve withdrawal y child_balance.
+Flutter reemplaza withdrawal por el devuelto.
+Actualizar saldo del hijo con child_balance.balance_display porque el dinero retenido regresa.
+
+Prestamos
+GET /api/loans devuelve loans.
+Cada loan puede traer payment_summary.
+Flutter usa payment_summary para deuda, cuotas pendientes, vencimientos y estado.
+
+POST /api/loans devuelve message y loan.
+Si lo crea el padre tambien puede devolver remaining_balance y remaining_balance_display.
+Flutter inserta loan en la lista.
+Si viene remaining_balance_display, actualizar resumen del padre.
+
+POST /api/loans/{loan}/approve devuelve loan, remaining_balance_display, child_balance_cents y child_balance_display.
+Flutter reemplaza loan.
+Flutter actualiza resumen del padre con remaining_balance_display.
+Flutter actualiza saldo del hijo con child_balance_display.
+
+POST /api/loans/{loan}/respond devuelve loan, member_balance_cents y member_balance_display.
+Flutter reemplaza loan.
+Si el hijo acepto, actualizar saldo visible con member_balance_display.
+Si rechazo, solo actualizar estado del loan.
+
+POST /api/loan-payments/{loanPayment}/pay devuelve payment, loan, new_balance_display, parent_balance_display, unlocked_badges y domus_points.
+Flutter reemplaza payment dentro del loan.
+Flutter reemplaza loan completo.
+Flutter actualiza saldo del hijo con new_balance_display.
+Flutter actualiza puntos/nivel con domus_points.
+Si unlocked_badges no esta vacio, mostrar modal/toast.
+
+Mesadas
+GET /api/allowances devuelve allowances y summary.
+Flutter reemplaza lista y resumen.
+
+POST /api/allowances devuelve allowance y result.
+Flutter inserta allowance.
+Si result.executed es true, usar result.payment, result.remaining_parent_balance_display y result.child_balance_display.
+Si result es null, solo queda creada para futuro.
+
+POST /api/allowances/{allowance}/execute devuelve execution result.
+Flutter reemplaza allowance.
+Si viene payment, agregarlo al historial si la pantalla lo muestra.
+Actualizar resumen del padre con remaining_parent_balance_display.
+Actualizar saldo del hijo afectado con child_balance_display.
+
+Cajas de ahorro
+GET /api/savings-boxes devuelve savings_boxes.
+Flutter reemplaza la lista.
+
+POST /api/savings-boxes devuelve savings_box.
+Flutter inserta savings_box.
+
+POST /api/savings-boxes/{savingsBox}/deposit devuelve account, remaining_balance_cents y remaining_balance_display.
+Flutter reemplaza account dentro de la caja.
+Flutter actualiza saldo del hijo con remaining_balance_display.
+
+POST /api/savings-boxes/{savingsBox}/withdraw devuelve account, remaining_balance_cents y remaining_balance_display.
+Flutter reemplaza account dentro de la caja.
+Flutter actualiza saldo del hijo con remaining_balance_display.
+
+Metas
+GET /api/child/goals devuelve goals, balance_cents y balance_display.
+Flutter reemplaza metas y saldo del hijo.
+
+POST /api/child/goals devuelve goal.
+Flutter inserta goal.
+
+POST /api/child/goals/{goal}/deposit devuelve goal, balance_cents y balance_display.
+Flutter reemplaza goal.
+Flutter actualiza saldo del hijo con balance_display.
+
+POST /api/child/goals/{goal}/withdraw devuelve goal, balance_cents y balance_display.
+Flutter reemplaza goal.
+Flutter actualiza saldo del hijo con balance_display.
+
+POST /api/child/goals/{goal}/complete devuelve goal.
+Flutter reemplaza goal.
+No cambia saldo.
+
+POST /api/child/goals/{goal}/cancel devuelve goal, balance_cents y balance_display.
+Flutter reemplaza goal.
+Flutter actualiza saldo del hijo con balance_display porque el dinero vuelve.
+
+Tareas
+GET /api/parent/tasks devuelve tasks, available_balance_cents y available_balance_display.
+Flutter reemplaza lista y resumen del padre.
+
+POST /api/parent/tasks devuelve task, available_balance_cents y available_balance_display.
+Flutter inserta task.
+Flutter actualiza resumen del padre con available_balance_display.
+
+POST /api/parent/tasks/{task}/review con approve devuelve task, available_child_balance_display, unlocked_badges y domus_points.
+Flutter reemplaza task.
+Flutter actualiza saldo del hijo afectado con available_child_balance_display.
+Flutter actualiza puntos/nivel del hijo con domus_points.
+Si unlocked_badges no esta vacio, mostrar modal/toast.
+
+POST /api/parent/tasks/{task}/review con retry devuelve task.
+Flutter reemplaza task y lo deja como aceptada/en revision segun status.
+
+POST /api/parent/tasks/{task}/review con cancel devuelve task, available_balance_cents y available_balance_display.
+Flutter reemplaza task.
+Flutter actualiza resumen del padre con available_balance_display.
+
+POST /api/child/tasks/{task}/accept devuelve task.
+Flutter mueve task de abiertas a aceptadas.
+
+POST /api/tasks/member/completed/{task} devuelve task y unlocked_badges.
+Flutter reemplaza task y la muestra esperando confirmacion del padre.
+Normalmente no cambia saldo hasta que el padre apruebe.
+
+Puntos Domus e insignias
+GET /api/parent/domus-points devuelve members, rewards y redemptions.
+Flutter reemplaza las tres listas.
+
+POST /api/parent/domus-points/rewards devuelve reward.
+Flutter inserta reward.
+
+POST /api/parent/domus-points/redemptions/{redemption}/pay devuelve redemption.
+Flutter reemplaza redemption.
+
+GET /api/child/domus-points devuelve points, level, badges, rewards y redemptions.
+Flutter actualiza puntos, nivel, insignias, recompensas y canjes.
+Las insignias usan image_url si existe.
+
+POST /api/child/domus-points/rewards/{reward}/redeem devuelve redemption y domus_points.
+Flutter inserta redemption.
+Flutter actualiza puntos/nivel con domus_points.
+Flutter actualiza can_redeem en recompensas despues de recalcular con points.available o refrescando.
+
+Educacion
+GET /api/education/categories devuelve hero y categories.
+Flutter reemplaza categorias.
+
+GET /api/education/categories/{category}/courses devuelve category y courses.
+Flutter reemplaza lista de cursos.
+
+GET /api/education/courses/{course} devuelve category, course, lessons, current_lesson y progress.
+Flutter reemplaza detalle completo del curso.
+
+POST /api/education/lessons/{lesson}/complete devuelve lesson_completion y progress.
+Flutter marca esa leccion como completada.
+Flutter actualiza progress.
+
+POST /api/education/lesson-parts/{lessonPart}/submit devuelve score, total_questions, percentage, saved, last_result, reward, achievements y domus_points si es examen.
+Flutter muestra resultado.
+Si saved es true, guardar last_result en la parte de examen.
+Si reward viene, actualizar la card de premio.
+Si achievements no esta vacio, mostrar feedback de puntos ganados.
+Si domus_points viene, actualizar puntos/nivel del hijo.
+
+Cuando refrescar despues de aplicar respuesta
+- Refrescar lista si el modulo tiene orden, filtros o agrupaciones complejas.
+- Refrescar home al volver desde acciones que cambian dinero, puntos o deuda.
+- Refrescar puntos Domus despues de acciones con domus_points si la pantalla visible es de puntos.
+- Refrescar notificaciones despues de acciones importantes si se muestra actividad reciente.
+
+Checklist para Flutter
+- Ninguna pantalla debe depender de calculos sensibles si Laravel devuelve el resultado.
+- Cada POST debe tener handler de success que aplique entidad y balances devueltos.
+- Cada pantalla debe soportar loading, error, empty y success.
+- Padre e hijo deben tener providers separados por modulo cuando la UI sea distinta.
+- Los modelos deben aceptar campos opcionales porque algunas respuestas cambian segun rol o accion.

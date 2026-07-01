@@ -19,6 +19,7 @@
                 <a class="sidebar-link" href="/account/users"><span class="nav-icon">&bull;</span><span>Usuarios</span></a>
                 <a class="sidebar-link" href="/parent/loans"><span class="nav-icon">&bull;</span><span>Prestamos</span></a>
                 <a class="sidebar-link" href="/parent/transfers"><span class="nav-icon">&bull;</span><span>Dar dinero</span></a>
+                <a class="sidebar-link" href="/parent/withdrawals"><span class="nav-icon">&bull;</span><span>Retirar dinero</span></a>
                 <a class="sidebar-link" href="/parent/allowances"><span class="nav-icon">&bull;</span><span>Mesadas</span></a>
                 <a class="sidebar-link" href="/parent/savings-boxes"><span class="nav-icon">&bull;</span><span>Cajas de ahorro</span></a>
                 <a class="sidebar-link is-active" href="/parent/tasks"><span class="nav-icon">&bull;</span><span>Tareas</span></a>
@@ -46,7 +47,7 @@
                 <div class="field"><label for="task-description">Descripcion</label><input id="task-description" class="input" type="text" maxlength="255"></div>
                 <div class="field"><label for="task-reward">Recompensa (dinero)</label><input id="task-reward" class="input" type="number" min="0" step="1" required></div>
                 <div class="field"><label for="task-points">Puntos Domus</label><input id="task-points" class="input" type="number" min="0" max="100" step="1" required></div>
-                <p class="choice-helper">* 100 es el maximo de puntos Domus por tarea y representa una recompensa por un trabajo excepcionalmente bueno.</p>
+                <p class="choice-helper">* 100 es el maximo de puntos Domus por tarea. Representa una tarea muy grande, dificil y meritoria.</p>
                 <p class="choice-helper">* El dinero de la recompensa se registra para que el movimiento quede visible en tu historial.</p>
                 <div id="task-feedback" class="feedback-box is-hidden"></div>
                 <button class="btn gold-btn mt-1" type="submit">Crear tarea</button>

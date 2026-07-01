@@ -1,0 +1,68 @@
+DOMUS FLUTTER - LOGIN, REGISTRO Y SESION
+
+Objetivo
+Manejar acceso, registro, token y redireccion por rol.
+
+Reglas Flutter
+- Auth debe estar separado de pantallas de padre e hijo.
+- Guardar token con flutter_secure_storage.
+- No guardar password.
+- Crear AuthRepository para login, register, me y logout.
+- Crear AuthState para representar loading, sin sesion, con sesion y error.
+
+Pantallas
+- LoginPage.
+- RegisterParentPage.
+- TermsPage si se muestra terminos.
+- SplashSessionPage si se quiere validar token al abrir app.
+
+Endpoints
+- POST /api/login.
+- POST /api/register.
+- GET /api/me.
+- POST /api/logout.
+
+LoginPage
+Seccion 1: Encabezado.
+- Logo o marca DOMUS.
+- Titulo: Iniciar sesion.
+- Texto corto de bienvenida.
+
+Seccion 2: Formulario.
+- Campo login para email o username.
+- Campo password.
+- Boton Entrar.
+- Link Crear cuenta.
+- Mensaje de error si API devuelve message.
+
+RegisterParentPage
+Seccion 1: Encabezado.
+- Titulo: Crear cuenta.
+- Texto: crea la cuenta principal de padre.
+
+Seccion 2: Formulario.
+- Campo name.
+- Campo email.
+- Campo password.
+- Campo password_confirmation.
+- Checkbox terms_accepted.
+- Link a terminos.
+- Boton Crear cuenta.
+
+Validacion local
+- Campos requeridos.
+- Password y confirmacion deben coincidir antes de enviar.
+- Aceptar terminos requerido.
+- Laravel valida reglas finales.
+
+Flujo al iniciar app
+- Si no hay token, mostrar LoginPage.
+- Si hay token, pedir GET /api/me.
+- Si user.role es parent, abrir ParentShell.
+- Si user.role es child o member, abrir ChildShell.
+- Si GET /api/me responde 401, borrar token y volver a LoginPage.
+
+Flujo al cerrar sesion
+- Llamar POST /api/logout.
+- Borrar token local aunque el endpoint falle.
+- Volver a LoginPage.

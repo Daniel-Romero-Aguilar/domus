@@ -1,0 +1,80 @@
+DOMUS FLUTTER - PLAN GENERAL IDEAL
+
+Flutter arriba de todo
+- Usar arquitectura simple y escalable: presentation, domain, data.
+- Separar pantallas de padre e hijo. Ejemplo: ParentLoansPage y ChildLoansPage, no una sola pantalla llena de if(role).
+- Separar tambien servicios/repositories por modulo: AuthRepository, LoansRepository, TasksRepository, etc.
+- Centralizar diseno en AppColors y AppTheme. No poner Color(0xFF...) regado en cada pantalla.
+- Cambios globales como color principal, botones, inputs, cards y textos deben hacerse desde el Theme.
+- El token bearer se guarda seguro con flutter_secure_storage.
+- Dio o http deben pasar Authorization: Bearer <token> en cada request autenticado.
+- Usar modelos typed por respuesta API. Evitar Map dinamicos en toda la app.
+- La UI se actualiza con la respuesta de la API. Ejemplo: si pagar prestamo devuelve new_balance_cents, actualizar el balance local con ese valor.
+- Despues de una accion importante se puede refrescar la lista del modulo, pero el primer cambio visible debe salir de la respuesta.
+- Manejo de estado recomendado: Riverpod o Bloc. Si quieres simple: Riverpod con StateNotifier/AsyncNotifier.
+- Cada pantalla debe tener loading, error, empty state y success feedback.
+- No hardcodear reglas de negocio delicadas en Flutter. Flutter muestra, valida basico y manda datos; Laravel decide si se puede.
+
+Base API
+- Base URL configurable por ambiente: local, staging, production.
+- Endpoints base estan en: .agents/domus_api_endpoints.txt
+- Descripcion del menu padre: .agents/flutter_app_docs/01a_parent_menu_navigation.txt
+- Descripcion del menu hijo: .agents/flutter_app_docs/01b_child_menu_navigation.txt
+- Para programar una pantalla, pasar primero este plan general, luego endpoints, luego el menu correspondiente y finalmente el TXT de la pantalla.
+- Todas las cantidades de dinero se muestran usando amount_display si viene.
+- Para calculos internos usar *_cents, no strings.
+- Si una respuesta trae unlocked_badges, Flutter muestra modal/toast de insignias ganadas.
+- Si una respuesta trae balance_cents, member_balance_cents, new_balance_cents o remaining_balance_cents, Flutter actualiza el balance visible correspondiente.
+
+Roles
+- parent: papa/admin familiar.
+- child/member: hijo o integrante familiar.
+- superadmin: empresa/web admin. No mezclar con app familiar si no se pide.
+
+Navegacion ideal
+- Login/Register sin tab principal.
+- ParentShell con tabs/menu de padre.
+- ChildShell con tabs/menu de hijo.
+- Al hacer GET /api/me decidir shell inicial.
+- Si cambia el rol o token invalido, cerrar sesion local y volver a Login.
+
+Estructura sugerida
+- lib/core/api/api_client.dart
+- lib/core/auth/token_storage.dart
+- lib/core/widgets/money_text.dart
+- lib/features/auth/
+- lib/features/parent_home/
+- lib/features/child_home/
+- lib/features/family_members/
+- lib/features/loans_parent/
+- lib/features/loans_child/
+- lib/features/transfers/
+- lib/features/withdrawals/
+- lib/features/allowances/
+- lib/features/savings_boxes/
+- lib/features/goals/
+- lib/features/tasks_parent/
+- lib/features/tasks_child/
+- lib/features/domus_points_parent/
+- lib/features/domus_points_child/
+- lib/features/education/
+- lib/features/notifications/
+
+Flujo general de datos
+1. Usuario abre app.
+2. Si hay token, pedir GET /api/me.
+3. Si role parent, abrir ParentShell.
+4. Si role child/member, abrir ChildShell.
+5. Cada pantalla carga su endpoint principal.
+6. Al hacer accion, mandar POST.
+7. Usar respuesta para actualizar estado local.
+8. Opcional: refrescar lista despues para consistencia.
+
+Regla visual
+- La app debe parecer financiera/familiar, clara y confiable.
+- Componentes reutilizables: DomusCard, MoneyAmount, StatusPill, EmptyState, PrimaryButton.
+- Crear lib/core/theme/app_colors.dart para colores base: primary, gold, background, surface, danger, success.
+- Crear lib/core/theme/app_theme.dart para ThemeData: ColorScheme, botones, inputs, cards, textos.
+- Las pantallas deben usar Theme.of(context).colorScheme o widgets Domus, no colores hardcodeados.
+- Si se cambia el azul principal de Domus, debe cambiarse en una sola linea dentro de AppColors/AppTheme.
+- Evitar duplicar UI exacta si se puede reutilizar widget puro, pero mantener paginas separadas por rol.

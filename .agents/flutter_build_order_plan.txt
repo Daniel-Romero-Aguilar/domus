@@ -1,0 +1,818 @@
+DOMUS FLUTTER - PLAN CONSTRUIBLE EN ORDEN
+
+Objetivo
+Este documento es una ruta de construccion para una app Flutter real. No es una idea general. Cada etapa dice que archivos crear, que debe contener cada archivo y cuando se puede considerar terminada.
+
+Documentos base que siempre se pasan junto a este plan
+- .agents/domus_api_endpoints.txt
+- .agents/flutter_app_docs/18_api_response_contract_ideal.txt
+- El TXT especifico de la pantalla que toque.
+
+Consistencia obligatoria con API real
+- La API real ya existe hoy. No escribir el plan como si faltaran endpoints.
+- No inventar endpoints nuevos en Flutter.
+- No usar rutas distintas a las de .agents/domus_api_endpoints.txt.
+- Si Laravel cambia una ruta, primero actualizar .agents/domus_api_endpoints.txt y despues este plan si aplica.
+- Si este plan menciona una ruta, debe existir en routes/api.php.
+- Si .agents/domus_api_endpoints.txt menciona una respuesta, debe coincidir con el controlador real de Laravel.
+- Flutter debe construirse contra la API real desde el momento en que se implementa cada feature.
+- Las pantallas temporales son validas solo al construir menus y navegacion inicial. Sirven para evitar fallos mientras el modulo todavia no se implementa.
+- Una pantalla temporal debe decir claramente que funcion ira ahi, por ejemplo: "Aqui estara Retirar dinero".
+- Una pantalla temporal no cuenta como modulo terminado.
+- Cuando una etapa implementa un modulo, debe reemplazar la pantalla temporal por la pantalla real conectada a la API real.
+
+Reglas para datos vacios, null y empty states
+- Si una lista viene vacia o null, tratarla como lista vacia.
+- Si un total numerico viene null porque aun no hay movimientos, mostrar 0.
+- Si un monto viene null, mostrar $0.00 usando MoneyText.
+- Si un nivel viene null, mostrar "Sin nivel".
+- Si una imagen de insignia viene null, mostrar imagen por defecto.
+- Si una fecha viene null, mostrar "Sin fecha" o esconder la fila si no aporta contexto.
+- Si no hay movimientos recientes, mostrar "Aun no hay movimientos recientes".
+- Si no hay prestamos, mostrar deuda 0 y "Todavia no hay prestamos".
+- Si no hay usuarios familiares, mostrar "Todavia no has creado usuarios".
+- Si no hay tareas, mostrar "No tienes tareas creadas" en padre y "No hay tareas disponibles" en hijo.
+- Si no hay recompensas, insignias o canjes, mostrar empty state especifico de esa seccion.
+- No mostrar error cuando la API responde correctamente con lista vacia. Eso es estado vacio, no fallo.
+- Mostrar ErrorView solo cuando falle la peticion o Laravel devuelva error.
+
+Reglas obligatorias de calidad
+- No crear una sola pantalla gigante para padre e hijo.
+- No crear un unico root que arme toda la app dinamicamente.
+- No poner toda la UI de una pantalla en un solo metodo enorme.
+- No poner llamadas API directas dentro de widgets visuales.
+- No poner reglas sensibles de dinero, puntos, prestamos o permisos en Flutter.
+- No hardcodear colores en cada pantalla; usar AppColors y AppTheme.
+- No mezclar responsabilidades: paginas, widgets, repositories y modelos deben estar separados.
+- No ahorrar archivos si eso vuelve dificil entender el codigo.
+- No exagerar creando un archivo para cada linea; separar cuando tenga sentido real.
+- Si una pantalla es diferente para padre e hijo, crear dos pantallas separadas.
+- Si una pantalla comparte una tarjeta pequena con otra pantalla, crear widget compartido solo si realmente se reutiliza.
+- Cada feature debe tener data, domain y presentation.
+- Cada feature debe conectarse a los endpoints reales indicados en su documento.
+- Cada accion POST debe usar primero la respuesta de Laravel para actualizar UI.
+- Cada pantalla debe tener loading, error, empty state y feedback de exito.
+
+Regla de trazabilidad
+Para trabajar una pantalla siempre usar estos documentos en este orden:
+1. .agents/flutter_build_order_plan.txt para saber en que etapa va.
+2. .agents/domus_api_endpoints.txt para saber rutas, body y respuesta.
+3. .agents/flutter_app_docs/18_api_response_contract_ideal.txt para saber como actualizar UI con la respuesta.
+4. El TXT de la pantalla, por ejemplo 05_parent_loans.txt o 13_child_tasks.txt.
+
+Regla de ubicacion de codigo
+- API de un modulo va en features/modulo/data.
+- Modelos del modulo van en features/modulo/domain.
+- Pantallas y widgets del modulo van en features/modulo/presentation.
+- Widgets usados por varios modulos van en core/widgets.
+- Tema, colores y estilos globales van en core/theme.
+- Token y sesion global van en core/auth y features/auth.
+- Rutas globales van en app/router.
+
+Mapa de endpoints reales por feature
+Auth:
+- POST /api/register.
+- POST /api/login.
+- GET /api/me.
+- GET /api/user. Ruta default disponible; para sesion usar preferentemente /api/me porque trae mas contexto.
+- POST /api/logout.
+
+Notificaciones:
+- GET /api/notifications.
+
+Saldo directo:
+- POST /api/balance/add.
+
+Usuarios familiares:
+- GET /api/family-members.
+- GET /api/family-members-summary.
+- GET /api/family-members/{user}/summary.
+- POST /api/family-members.
+
+Transferencias:
+- GET /api/transfers.
+- POST /api/transfers.
+
+Retiros de dinero:
+- GET /api/withdrawals.
+- POST /api/parent/withdrawals.
+- POST /api/child/withdrawals.
+- POST /api/withdrawals/{cashWithdrawal}/accept.
+- POST /api/withdrawals/{cashWithdrawal}/cancel.
+
+Prestamos:
+- GET /api/loans.
+- GET /api/loans/waiting.
+- GET /api/loans/active-total.
+- POST /api/loans.
+- POST /api/loans/{loan}/approve.
+- POST /api/loans/{loan}/respond.
+- POST /api/loan-payments/{loanPayment}/pay.
+
+Mesadas:
+- GET /api/allowances.
+- POST /api/allowances.
+- POST /api/allowances/{allowance}/execute.
+
+Cajas de ahorro:
+- GET /api/savings-boxes.
+- POST /api/savings-boxes.
+- POST /api/savings-boxes/{savingsBox}/deposit.
+- POST /api/savings-boxes/{savingsBox}/withdraw.
+
+Metas:
+- GET /api/child/goals.
+- POST /api/child/goals.
+- POST /api/child/goals/{goal}/deposit.
+- POST /api/child/goals/{goal}/withdraw.
+- POST /api/child/goals/{goal}/complete.
+- POST /api/child/goals/{goal}/cancel.
+
+Tareas:
+- GET /api/parent/tasks.
+- POST /api/parent/tasks.
+- POST /api/parent/tasks/{task}/review.
+- GET /api/child/tasks.
+- POST /api/child/tasks/{task}/accept.
+- POST /api/tasks/member/completed/{task}.
+
+Puntos Domus, niveles e insignias:
+- GET /api/domus-levels.
+- GET /api/parent/domus-points.
+- POST /api/parent/domus-points/rewards.
+- POST /api/parent/domus-points/redemptions/{redemption}/pay.
+- GET /api/child/domus-points.
+- POST /api/child/domus-points/rewards/{reward}/redeem.
+
+Educacion:
+- GET /api/education/categories.
+- GET /api/education/categories/{category}/courses.
+- GET /api/education/courses/{course}.
+- POST /api/education/lessons/{lesson}/complete.
+- POST /api/education/lesson-parts/{lessonPart}/submit.
+
+Ejemplo de modulo bien separado
+Para prestamos no hacer una sola pantalla con if role.
+Crear:
+- lib/features/loans_parent/data/parent_loans_repository.dart
+- lib/features/loans_parent/domain/loan.dart
+- lib/features/loans_parent/presentation/parent_loans_page.dart
+- lib/features/loans_child/data/child_loans_repository.dart
+- lib/features/loans_child/domain/loan.dart
+- lib/features/loans_child/presentation/child_loans_page.dart
+
+Ejemplo de mala practica prohibida
+- Una sola LoansPage con if role en casi todo el archivo.
+- Un solo app_state.dart con todos los datos de toda la app.
+- Un widget que llama Dio directamente desde build().
+- Un archivo de 1500 lineas que mezcla formulario, API, modelos y estilos.
+- Una pantalla que recalcula saldo despues de pagar en vez de usar new_balance_display.
+
+Ejemplo de practica aceptable
+- ParentLoansPage usa ParentLoansRepository.
+- ChildLoansPage usa ChildLoansRepository.
+- Ambas pueden compartir LoanCard si visualmente es casi igual.
+- El pago de cuota usa la respuesta: loan, payment, new_balance_display, unlocked_badges y domus_points.
+- Despues de aplicar esa respuesta, se puede refrescar /api/loans para confirmar.
+
+Dependencias recomendadas en pubspec.yaml
+- flutter_riverpod para estado.
+- dio para HTTP.
+- flutter_secure_storage para guardar token.
+- go_router para rutas.
+- intl para formato de fechas si hace falta.
+
+No fijar versiones en este TXT. Que Flutter instale versiones compatibles con el proyecto.
+
+Estructura inicial exacta
+Crear esta estructura dentro de lib:
+
+lib/main.dart
+lib/app/domus_app.dart
+lib/app/router/app_router.dart
+lib/core/api/api_client.dart
+lib/core/api/api_exception.dart
+lib/core/auth/token_storage.dart
+lib/core/config/api_config.dart
+lib/core/theme/app_colors.dart
+lib/core/theme/app_theme.dart
+lib/core/widgets/domus_card.dart
+lib/core/widgets/domus_empty_state.dart
+lib/core/widgets/domus_error_view.dart
+lib/core/widgets/domus_loading_view.dart
+lib/core/widgets/money_text.dart
+lib/core/widgets/primary_button.dart
+lib/core/widgets/status_pill.dart
+lib/features/auth/data/auth_repository.dart
+lib/features/auth/domain/auth_user.dart
+lib/features/auth/presentation/login_page.dart
+lib/features/auth/presentation/register_page.dart
+lib/features/auth/presentation/session_controller.dart
+lib/features/parent_shell/presentation/parent_shell.dart
+lib/features/child_shell/presentation/child_shell.dart
+lib/features/navigation/presentation/module_pending_page.dart
+
+ETAPA 1 - Tema visual real
+Docs a usar:
+- .agents/flutter_app_docs/00_general_flutter_plan.txt
+
+Crear lib/core/theme/app_colors.dart con estos valores exactos tomados del CSS actual:
+
+```dart
+import 'package:flutter/material.dart';
+
+abstract final class AppColors {
+  static const blue900 = Color(0xFF021B57);
+  static const blue800 = Color(0xFF0A2F7F);
+  static const blue700 = Color(0xFF113F9C);
+  static const gold500 = Color(0xFFD6A645);
+  static const gold400 = Color(0xFFE4BE6A);
+  static const surface = Color(0xFFFFFFFF);
+  static const appBackground = Color(0xFFF8FAFC);
+  static const text = Color(0xFF0F172A);
+  static const muted = Color(0xFF4B5563);
+  static const border = Color(0xFFDBE4F0);
+  static const successBg = Color(0xFFE8F7EE);
+  static const successText = Color(0xFF166534);
+  static const errorBg = Color(0xFFFEF2F2);
+  static const errorText = Color(0xFF991B1B);
+  static const infoBg = Color(0xFFEAF2FF);
+  static const warningBg = Color(0xFFFFF6DF);
+}
+```
+
+Crear lib/core/theme/app_theme.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import 'app_colors.dart';
+
+abstract final class AppTheme {
+  static ThemeData light() {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: AppColors.blue900,
+      primary: AppColors.blue900,
+      secondary: AppColors.gold500,
+      surface: AppColors.surface,
+      error: AppColors.errorText,
+      brightness: Brightness.light,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: AppColors.appBackground,
+      fontFamily: 'Segoe UI',
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.blue900,
+        foregroundColor: Colors.white,
+        centerTitle: false,
+      ),
+      cardTheme: CardThemeData(
+        color: AppColors.surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors.border),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.blue900,
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(48),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.blue700, width: 2),
+        ),
+      ),
+    );
+  }
+}
+```
+
+Crear lib/app/domus_app.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import '../core/theme/app_theme.dart';
+import 'router/app_router.dart';
+
+class DomusApp extends StatelessWidget {
+  const DomusApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      title: 'Domus',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
+      routerConfig: appRouter,
+    );
+  }
+}
+```
+
+Crear lib/main.dart:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'app/domus_app.dart';
+
+void main() {
+  runApp(const ProviderScope(child: DomusApp()));
+}
+```
+
+Terminado cuando:
+- La app compila.
+- Se ve una pantalla temporal de navegacion usando AppTheme.
+- Cambiar AppColors.blue900 cambia el color principal.
+
+ETAPA 2 - Widgets reutilizables reales
+Docs a usar:
+- .agents/flutter_app_docs/00_general_flutter_plan.txt
+
+Crear DomusCard:
+- Recibe child.
+- Usa padding 16.
+- Usa radio 16.
+- Usa borde AppColors.border.
+- Usa color AppColors.surface.
+
+Crear PrimaryButton:
+- Recibe text, onPressed, isLoading opcional.
+- Si isLoading true, mostrar CircularProgressIndicator chico y deshabilitar.
+
+Crear MoneyText:
+- Recibe display opcional y cents opcional.
+- Si display existe, mostrar display.
+- Si solo cents existe, mostrar '$' + cents / 100 con dos decimales.
+- Si no hay nada, mostrar '$0.00'.
+
+Crear StatusPill:
+- Recibe label y type.
+- Types iniciales: neutral, success, warning, danger, info.
+- Usar fondos: infoBg, successBg, warningBg, errorBg.
+
+Crear EmptyState:
+- title.
+- message.
+- actionText opcional.
+- onAction opcional.
+
+Crear LoadingView:
+- Texto default: "Cargando...".
+
+Crear ErrorView:
+- message.
+- retry opcional.
+
+Terminado cuando:
+- Se puede abrir una pantalla demo que muestra todos los widgets.
+- No hay colores hardcodeados fuera de AppColors en estos widgets.
+
+ETAPA 3 - Configuracion API y errores
+Docs a usar:
+- .agents/domus_api_endpoints.txt
+- .agents/flutter_app_docs/18_api_response_contract_ideal.txt
+
+Crear lib/core/config/api_config.dart:
+
+```dart
+abstract final class ApiConfig {
+  static const baseUrl = String.fromEnvironment(
+    'DOMUS_API_BASE_URL',
+    defaultValue: 'http://10.0.2.2:8000/api',
+  );
+}
+```
+
+Crear lib/core/api/api_exception.dart:
+
+```dart
+class ApiException implements Exception {
+  ApiException({
+    required this.message,
+    this.statusCode,
+    this.errors,
+  });
+
+  final String message;
+  final int? statusCode;
+  final Map<String, dynamic>? errors;
+
+  @override
+  String toString() => message;
+}
+```
+
+Crear lib/core/auth/token_storage.dart:
+- Metodo readToken().
+- Metodo saveToken(String token).
+- Metodo clear().
+- Implementar con FlutterSecureStorage.
+
+Crear lib/core/api/api_client.dart:
+- Usar Dio.
+- BaseUrl desde ApiConfig.baseUrl.
+- Antes de cada request, leer token y poner Authorization: Bearer token si existe.
+- Si Laravel devuelve error, lanzar ApiException usando response.data['message'].
+- Soportar get, post.
+
+Terminado cuando:
+- Se puede hacer GET /api/me y manejar 401 sin crashear.
+- Los errores 422 llegan con message y errors.
+
+ETAPA 4 - Auth completo
+Docs a usar:
+- .agents/flutter_app_docs/01_auth_login_register.txt
+- .agents/domus_api_endpoints.txt
+
+Crear AuthUser con:
+- id.
+- name.
+- email nullable.
+- username nullable.
+- role.
+- balanceCents nullable.
+- balanceDisplay nullable.
+
+Crear AuthRepository con:
+- login(login, password).
+- register(name, email, password, passwordConfirmation, termsAccepted).
+- me().
+- logout().
+
+Crear SessionController con Riverpod:
+- estado loading, unauthenticated, authenticated.
+- al iniciar: leer token, si existe pedir me().
+- login exitoso: guardar token, pedir me(), navegar segun role.
+- logout: llamar API si se puede, borrar token local.
+
+Pantallas:
+- LoginPage con campo login y password.
+- RegisterPage con name, email, password, confirmation y checkbox terms.
+
+Ruteo:
+- Sin sesion: /login.
+- parent: /parent.
+- child/member: /child.
+
+Terminado cuando:
+- Login real entra.
+- Register real entra.
+- Cerrar sesion borra token.
+- Si app reinicia con token valido, vuelve al shell correcto.
+
+ETAPA 5 - Shells y menus con navegacion temporal
+Docs a usar:
+- .agents/flutter_app_docs/01a_parent_menu_navigation.txt
+- .agents/flutter_app_docs/01b_child_menu_navigation.txt
+
+Crear ParentShell:
+- Sidebar o NavigationDrawer en mobile.
+- Header con nombre del padre.
+- Boton cerrar sesion.
+- ContentSlot donde se muestra la pagina elegida.
+
+Menu padre exacto:
+- Inicio.
+- Usuarios.
+- Prestamos.
+- Dar dinero.
+- Retirar dinero.
+- Mesadas.
+- Cajas de ahorro.
+- Tareas.
+- Puntos Domus.
+- Educacion.
+
+Crear ChildShell:
+- Header con nombre del hijo.
+- Texto de nivel: "Sin nivel" hasta cargar /api/child/domus-points.
+- Boton cerrar sesion.
+
+Menu hijo exacto:
+- Inicio.
+- Prestamos.
+- Cajas de ahorro.
+- Metas.
+- Retirar dinero.
+- Tareas.
+- Puntos Domus.
+- Educacion.
+
+Crear ModulePendingPage:
+- title.
+- description.
+- Ejemplo visible: "Prestamos se construye en la etapa 9. Esta pantalla temporal solo prueba navegacion."
+
+Terminado cuando:
+- Padre ve solo menu de padre.
+- Hijo ve solo menu de hijo.
+- Todas las opciones abren ModulePendingPage temporal o una pagina real ya construida.
+- No hay una sola pantalla gigante con if role para todo.
+
+ETAPA 6 - Home con API real y errores parciales controlados
+Docs a usar:
+- .agents/flutter_app_docs/02_parent_home_dashboard.txt
+- .agents/flutter_app_docs/03_child_home_dashboard.txt
+- .agents/flutter_app_docs/17_notifications_recent_activity.txt
+
+Crear ParentHomePage con secciones:
+- Encabezado.
+- Tarjetas: dinero usado, total prestado, intereses generados.
+- Resumen de usuarios.
+- Distribucion de deuda.
+- Ultimos movimientos.
+- Acceso rapido Nuevo prestamo.
+
+Endpoints reales del padre:
+- GET /api/me.
+- GET /api/family-members-summary.
+- GET /api/loans.
+- GET /api/loans/active-total.
+- GET /api/notifications?limit=6.
+
+Implementacion:
+- Conectar endpoints reales desde esta etapa.
+- Mientras cargan, mostrar LoadingView o skeleton simple.
+- Si /api/family-members-summary devuelve lista vacia, mostrar "Todavia no has creado usuarios".
+- Si /api/loans devuelve lista vacia, mostrar deuda 0 y empty state.
+- Si un endpoint parcial falla, mostrar ErrorView solo en esa seccion.
+
+Crear ChildHomePage con secciones:
+- Encabezado.
+- Tarjetas: dinero disponible, deuda total, ahorros totales, puntos Domus.
+- Accesos rapidos.
+- Ultimos movimientos.
+
+Endpoints reales del hijo:
+- GET /api/me.
+- GET /api/loans.
+- GET /api/savings-boxes.
+- GET /api/child/goals.
+- GET /api/child/domus-points.
+- GET /api/notifications?limit=6.
+
+Implementacion:
+- Conectar endpoints reales desde esta etapa.
+- Usar /api/me para saldo.
+- Usar /api/child/domus-points para puntos y nivel.
+- Si loans, savings o goals fallan, mostrar error parcial en esa seccion.
+- Si vienen vacios, mostrar 0 y empty state claro.
+
+Terminado cuando:
+- Home no se rompe si un endpoint falla.
+- Si no hay datos, se ven empty states claros.
+- Las tarjetas usan MoneyText.
+
+ETAPA 7 - Usuarios familiares
+Docs a usar:
+- .agents/flutter_app_docs/04_family_members_parent.txt
+
+Crear feature:
+lib/features/family_members/data/family_members_repository.dart
+lib/features/family_members/domain/family_member.dart
+lib/features/family_members/presentation/parent_family_members_page.dart
+lib/features/family_members/presentation/parent_member_detail_page.dart
+
+Pantalla lista:
+- Cargar GET /api/family-members.
+- Mostrar members.
+- Form crear: name, username, password, password_confirmation, is_minor, guardian_declaration_accepted.
+
+Detalle:
+- Cargar GET /api/family-members/{user}/summary.
+- Mostrar saldo, puntos, nivel, deuda, prestamos.
+
+Terminado cuando:
+- Se puede crear hijo/integrante.
+- El nuevo integrante aparece sin reiniciar app.
+- Otros modulos pueden usar loan_targets para selects.
+
+ETAPA 8 - Saldo directo, dar dinero y retiros
+Docs a usar:
+- .agents/flutter_app_docs/07_parent_transfers_give_money.txt
+- .agents/flutter_app_docs/08_cash_withdrawals_parent_child.txt
+- .agents/flutter_app_docs/18_api_response_contract_ideal.txt
+
+Saldo directo:
+- POST /api/balance/add.
+- Usar balance_cents, balance_display, movement, unlocked_badges y domus_points.
+- Si se usa esta accion en una pantalla de saldo, actualizar primero el saldo devuelto por Laravel.
+
+Dar dinero:
+- ParentTransfersPage.
+- GET /api/transfers.
+- POST /api/transfers con Idempotency-Key.
+- Al exito, actualizar transfer list, remaining_parent_balance_display y child_balance_display.
+
+Retiros:
+- ParentWithdrawalsPage.
+- ChildWithdrawalsPage.
+- GET /api/withdrawals.
+- Mostrar withdrawals y requests separados.
+- POST /api/parent/withdrawals.
+- POST /api/child/withdrawals.
+- POST /api/withdrawals/{cashWithdrawal}/accept.
+- POST /api/withdrawals/{cashWithdrawal}/cancel.
+
+Terminado cuando:
+- Ambos roles pueden iniciar retiro.
+- Ambos roles pueden aceptar solicitud pendiente.
+- El saldo visible cambia con child_balance.balance_display.
+
+ETAPA 9 - Prestamos
+Docs a usar:
+- .agents/flutter_app_docs/05_parent_loans.txt
+- .agents/flutter_app_docs/06_child_loans.txt
+- .agents/flutter_app_docs/18_api_response_contract_ideal.txt
+
+Crear paginas separadas:
+- ParentLoansPage.
+- ChildLoansPage.
+
+Modelos minimos:
+- Loan.
+- LoanPayment.
+- PaymentSummary.
+
+Padre:
+- Listar /api/loans.
+- Revisar espera con GET /api/loans/waiting si se necesita separar pendientes.
+- Cargar resumen con GET /api/loans/active-total.
+- Crear POST /api/loans.
+- Aprobar POST /api/loans/{loan}/approve.
+
+Hijo:
+- Listar /api/loans.
+- Revisar espera con GET /api/loans/waiting si se necesita separar pendientes.
+- Solicitar POST /api/loans.
+- Responder oferta POST /api/loans/{loan}/respond.
+- Pagar cuota POST /api/loan-payments/{loanPayment}/pay.
+
+Terminado cuando:
+- Pagar cuota reemplaza loan y payment.
+- Saldo del hijo cambia con new_balance_display.
+- Si vienen unlocked_badges, se muestra feedback.
+- Si vienen domus_points, se actualiza nivel/puntos.
+
+ETAPA 10 - Mesadas, cajas y metas
+Docs a usar:
+- .agents/flutter_app_docs/09_parent_allowances.txt
+- .agents/flutter_app_docs/10_savings_boxes_parent_child.txt
+- .agents/flutter_app_docs/11_child_goals.txt
+
+Mesadas:
+- ParentAllowancesPage.
+- GET /api/allowances.
+- POST /api/allowances.
+- POST /api/allowances/{allowance}/execute.
+- Usar result si se ejecuto pago.
+
+Cajas:
+- ParentSavingsBoxesPage.
+- ChildSavingsBoxesPage.
+- GET /api/savings-boxes.
+- POST /api/savings-boxes.
+- POST /api/savings-boxes/{savingsBox}/deposit.
+- POST /api/savings-boxes/{savingsBox}/withdraw.
+- Actualizar account y remaining_balance_display.
+
+Metas:
+- ChildGoalsPage.
+- GET /api/child/goals.
+- POST /api/child/goals.
+- POST /api/child/goals/{goal}/deposit.
+- POST /api/child/goals/{goal}/withdraw.
+- POST /api/child/goals/{goal}/complete.
+- POST /api/child/goals/{goal}/cancel.
+- Actualizar goal y balance_display.
+
+Terminado cuando:
+- Cada modulo tiene lista, empty state, formulario y feedback.
+- Ningun rendimiento de caja se calcula en Flutter.
+- Ningun saldo se inventa despues de POST.
+
+ETAPA 11 - Tareas
+Docs a usar:
+- .agents/flutter_app_docs/12_parent_tasks.txt
+- .agents/flutter_app_docs/13_child_tasks.txt
+
+ParentTasksPage:
+- GET /api/parent/tasks.
+- POST /api/parent/tasks.
+- POST /api/parent/tasks/{task}/review.
+- Campo reward_points con max 100 en UI.
+- Texto bajo puntos: "100 es el maximo y representa una tarea muy grande, dificil o meritoria."
+
+ChildTasksPage:
+- GET /api/child/tasks.
+- POST /api/child/tasks/{task}/accept.
+- POST /api/tasks/member/completed/{task}.
+
+Terminado cuando:
+- Hijo acepta tarea y cambia de abierta a aceptada.
+- Hijo pide revision.
+- Padre aprueba, devuelve o cancela.
+- Al aprobar, Flutter usa available_child_balance_display, unlocked_badges y domus_points.
+
+ETAPA 12 - Puntos Domus e insignias
+Docs a usar:
+- .agents/flutter_app_docs/14_parent_domus_points_rewards.txt
+- .agents/flutter_app_docs/15_child_domus_points_badges_levels.txt
+
+ParentDomusPointsPage:
+- GET /api/domus-levels si el padre necesita mostrar definicion de niveles.
+- GET /api/parent/domus-points.
+- POST /api/parent/domus-points/rewards.
+- POST /api/parent/domus-points/redemptions/{redemption}/pay.
+
+ChildDomusPointsPage:
+- GET /api/domus-levels.
+- GET /api/child/domus-points.
+- POST /api/child/domus-points/rewards/{reward}/redeem.
+- Mostrar badges con image_url.
+
+Componente global:
+- BadgeUnlockedToast o BadgeUnlockedDialog.
+- Se llama desde cualquier respuesta con unlocked_badges.
+
+Terminado cuando:
+- El hijo ve puntos, nivel, insignias, recompensas y canjes.
+- El padre ve puntos por integrante, recompensas y canjes.
+- Canjear recompensa actualiza domus_points.
+
+ETAPA 13 - Educacion
+Docs a usar:
+- .agents/flutter_app_docs/16_education.txt
+
+Paginas:
+- EducationCategoriesPage.
+- EducationCoursesPage.
+- EducationCourseDetailPage.
+
+Endpoints:
+- GET /api/education/categories.
+- GET /api/education/categories/{category}/courses.
+- GET /api/education/courses/{course}.
+- POST /api/education/lessons/{lesson}/complete.
+- POST /api/education/lesson-parts/{lessonPart}/submit.
+
+Terminado cuando:
+- Categorias abren cursos.
+- Cursos abren detalle.
+- Leccion muestra partes.
+- Quiz/examen envia answers.
+- Examen actualiza score, reward, achievements y domus_points.
+
+ETAPA 14 - Refresco global y consistencia
+Docs a usar:
+- .agents/flutter_app_docs/18_api_response_contract_ideal.txt
+
+Crear un helper de actualizacion:
+- Si response tiene balance_display, actualizar saldo global.
+- Si response tiene new_balance_display, actualizar saldo global del hijo.
+- Si response tiene child_balance.balance_display, actualizar saldo de ese hijo.
+- Si response tiene domus_points, actualizar puntos/nivel.
+- Si response tiene unlocked_badges, abrir dialog.
+
+Terminado cuando:
+- Acciones importantes actualizan UI antes del refresh.
+- Al volver al Home se refrescan datos.
+- No hay pantallas esperando reload manual para ver el cambio.
+
+Orden de construccion recomendado
+1. Tema, widgets y app base.
+2. API client y token.
+3. Auth.
+4. Shells y pantallas temporales.
+5. Homes.
+6. Usuarios.
+7. Saldo directo, dar dinero y retiros.
+8. Prestamos.
+9. Mesadas, cajas y metas.
+10. Tareas.
+11. Puntos e insignias.
+12. Educacion.
+13. Refresco global y pulido.
+
+Checklist final
+- La app compila al final de cada etapa.
+- ParentShell y ChildShell son archivos separados.
+- Cada feature tiene data, domain y presentation.
+- Cada pantalla tiene loading, error, empty y success.
+- Todas las cantidades visibles usan *_display.
+- Toda logica de dinero usa *_cents.
+- Las respuestas POST se aplican antes de refrescar.
+- No se recalculan reglas sensibles de Laravel en Flutter.

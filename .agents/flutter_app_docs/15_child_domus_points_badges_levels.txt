@@ -1,0 +1,62 @@
+DOMUS FLUTTER - PANTALLAS PUNTOS DOMUS, INSIGNIAS Y NIVELES HIJO
+
+Objetivo
+Hijo ve sus puntos, nivel, insignias ganadas y recompensas.
+
+Pantallas
+- ChildDomusPointsPage.
+- ChildLevelsPage.
+
+Endpoints
+- GET /api/child/domus-points.
+- GET /api/domus-levels.
+- POST /api/child/domus-points/rewards/{reward}/redeem.
+
+ChildDomusPointsPage
+Seccion 1: Encabezado.
+- Titulo: Mis Puntos Domus.
+- Mostrar puntos disponibles.
+- Mostrar nivel actual.
+- Texto motivacional corto.
+
+Seccion 2: Resumen de puntos.
+- Historicos.
+- Ganados.
+- Gastados.
+- Disponibles.
+
+Seccion 3: Insignias.
+Cada BadgeCard muestra:
+- Imagen desde image_url.
+- Imagen por defecto si no hay image_url.
+- Titulo.
+- Descripcion.
+- Puntos que otorga.
+- Estado ganada o pendiente.
+- Fecha de completado si viene.
+
+Seccion 4: Recompensas.
+Cada RewardCard muestra:
+- Titulo.
+- Descripcion.
+- Costo en puntos.
+- Si puede canjear o no.
+- Boton canjear si can_redeem es true.
+
+Seccion 5: Canjes.
+Cada RedemptionCard muestra:
+- Recompensa.
+- Puntos gastados.
+- Estado.
+- Fecha.
+
+ChildLevelsPage
+- Lista de niveles.
+- Cada nivel muestra numero, nombre, minimo, maximo y definicion.
+- Resaltar nivel actual si se tiene.
+
+Actualizacion
+- Canjear recompensa devuelve redemption y domus_points.
+- Actualizar puntos con domus_points.points.
+- Actualizar nivel con domus_points.level.
+- Refrescar GET /api/child/domus-points despues.

@@ -43,6 +43,11 @@ class BalanceHelper
         return '$'.number_format(self::cents($user) / 100, 2, '.', ',');
     }
 
+    public static function displayCents(int $cents): string
+    {
+        return '$'.number_format($cents / 100, 2, '.', ',');
+    }
+
     public static function parentMoneyUsedCents(User $user): int
     {
         $balanceId = $user->relationLoaded('balance')

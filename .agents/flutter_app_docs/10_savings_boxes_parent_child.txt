@@ -1,0 +1,64 @@
+DOMUS FLUTTER - PANTALLAS CAJAS DE AHORRO
+
+Objetivo
+Padre crea cajas de ahorro. Hijo deposita y retira si la caja lo permite.
+
+Pantallas
+- ParentSavingsBoxesPage.
+- ChildSavingsBoxesPage.
+
+Endpoints
+- GET /api/savings-boxes.
+- POST /api/savings-boxes.
+- POST /api/savings-boxes/{savingsBox}/deposit.
+- POST /api/savings-boxes/{savingsBox}/withdraw.
+
+ParentSavingsBoxesPage
+Seccion 1: Encabezado.
+- Titulo: Cajas de ahorro.
+- Texto: crea espacios de ahorro con fecha y rendimiento.
+
+Seccion 2: Lista de cajas.
+Cada SavingsBoxCard muestra:
+- Nombre.
+- Fecha de entrega.
+- Rendimiento anual.
+- Permite retiro anticipado o no.
+- Audiencia: todos o especificos.
+- Estado.
+- Participantes.
+- Totales por cuenta si vienen.
+
+Seccion 3: Crear caja.
+Formulario:
+- Nombre.
+- Fecha de entrega.
+- Porcentaje de rendimiento anual.
+- Checkbox permitir retiro anticipado.
+- Audiencia todos o especificos.
+- Selector de integrantes si audiencia especifica.
+- Boton crear.
+
+ChildSavingsBoxesPage
+Seccion 1: Encabezado.
+- Titulo: Cajas de ahorro.
+- Texto: guarda dinero y revisa lo que va generando.
+
+Seccion 2: Lista de cajas disponibles.
+Cada card muestra:
+- Nombre.
+- Fecha de entrega.
+- Rendimiento anual.
+- Ahorrado ahora.
+- Ganado ahora.
+- Ganancia estimada al final si se calcula en app.
+- Total estimado al final si se calcula en app.
+- Texto de reglas de retiro.
+- Form abonar dinero.
+- Form retirar dinero si allow_early_withdrawal es true.
+
+Actualizacion
+- Depositar devuelve account y remaining_balance_display.
+- Retirar devuelve account y remaining_balance_display.
+- Actualizar card con account.
+- Actualizar saldo del hijo con remaining_balance_display.

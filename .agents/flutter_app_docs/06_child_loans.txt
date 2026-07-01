@@ -1,0 +1,62 @@
+DOMUS FLUTTER - PANTALLA PRESTAMOS HIJO
+
+Objetivo
+Hijo solicita prestamos, acepta ofertas del padre y paga cuotas.
+
+Pantalla
+Nombre recomendado: ChildLoansPage.
+
+Endpoints
+- GET /api/loans.
+- GET /api/loans/waiting.
+- POST /api/loans.
+- POST /api/loans/{loan}/respond.
+- POST /api/loan-payments/{loanPayment}/pay.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Titulo: Prestamos.
+- Texto: revisa tus prestamos y pagos.
+- Mostrar saldo disponible actual.
+
+Seccion 2: Pestanas.
+- Mis prestamos.
+- Ofertas y solicitudes.
+- Historial.
+
+Seccion 3: Lista de prestamos.
+Cada LoanCard muestra:
+- Nombre del padre o familia.
+- Monto recibido o solicitado.
+- Motivo.
+- Estado.
+- Total a pagar.
+- Saldo pendiente.
+- Proxima cuota.
+- Cuotas pagadas y restantes.
+- Si hay atraso, mostrar aviso visible.
+- Boton pagar cuota si hay cuota pagable.
+- Boton aceptar oferta si status offered.
+- Boton rechazar oferta si status offered.
+
+Seccion 4: Solicitar prestamo.
+Formulario con:
+- Monto.
+- Motivo.
+- Fecha.
+- Numero de cuotas.
+- Frecuencia.
+- Interes si el producto lo permite.
+- Boton solicitar.
+
+Seccion 5: Confirmaciones.
+- Confirmar antes de pagar cuota.
+- Confirmar antes de aceptar oferta.
+- Pedir razon si rechaza oferta.
+
+Actualizacion
+- Al aceptar oferta, usar member_balance_cents y member_balance_display para actualizar saldo.
+- Al pagar cuota, usar new_balance_cents y new_balance_display.
+- Si viene domus_points, actualizar puntos y nivel.
+- Si viene unlocked_badges, mostrar modal de insignia.
+- Reemplazar el prestamo con loan retornado.

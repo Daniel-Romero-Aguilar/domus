@@ -1,0 +1,61 @@
+DOMUS FLUTTER - PANTALLA METAS HIJO
+
+Objetivo
+Hijo crea metas personales y mueve dinero entre saldo disponible y meta.
+
+Pantalla
+Nombre recomendado: ChildGoalsPage.
+
+Endpoints
+- GET /api/child/goals.
+- POST /api/child/goals.
+- POST /api/child/goals/{goal}/deposit.
+- POST /api/child/goals/{goal}/withdraw.
+- POST /api/child/goals/{goal}/complete.
+- POST /api/child/goals/{goal}/cancel.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Titulo: Mis metas.
+- Texto: guarda dinero para tus planes.
+- Mostrar saldo disponible con balance_display.
+
+Seccion 2: Pestanas o botones.
+- Mis metas.
+- Crear meta.
+
+Seccion 3: Lista de metas.
+Cada GoalCard muestra:
+- Nombre.
+- Descripcion.
+- Estado.
+- Ahorrado.
+- Meta objetivo o texto "Sin limite".
+- Barra de progreso si hay objetivo.
+- Porcentaje de avance si hay objetivo.
+- Boton expandir detalle.
+
+Detalle de meta
+- Ahorrado.
+- Objetivo.
+- Progreso.
+- Form guardar dinero.
+- Form retirar dinero si no esta cancelada.
+- Boton completar si esta activa y can_complete es true.
+- Boton cancelar si no esta cancelada.
+- Nota de estado.
+
+Seccion 4: Crear meta.
+Formulario:
+- Nombre.
+- Descripcion.
+- Meta de ahorro opcional.
+- Texto de ayuda: si queda vacio no hay limite.
+- Boton crear.
+
+Actualizacion
+- Depositar devuelve goal, balance_cents y balance_display.
+- Retirar devuelve goal, balance_cents y balance_display.
+- Cancelar devuelve goal, balance_cents y balance_display.
+- Completar devuelve goal.
+- Reemplazar goal en lista con el retornado.

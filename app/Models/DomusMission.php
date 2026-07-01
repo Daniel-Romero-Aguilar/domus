@@ -12,6 +12,7 @@ class DomusMission extends Model
         'slug',
         'title',
         'description',
+        'image_path',
         'points_reward',
         'sort_order',
         'is_active',

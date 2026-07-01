@@ -1,0 +1,68 @@
+DOMUS FLUTTER - PANTALLA INICIO PADRE
+
+Objetivo
+Construir la pantalla principal del padre con resumen financiero, usuarios, distribucion de deuda, movimientos recientes y acceso rapido.
+
+Pantalla
+Nombre recomendado: ParentHomePage.
+Se muestra dentro de ParentShell.
+
+Endpoints necesarios
+- GET /api/me.
+- GET /api/notifications?limit=6.
+- GET /api/family-members-summary.
+- GET /api/loans.
+- GET /api/loans/active-total.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Marca DOMUS.
+- Saludo con nombre del padre.
+- Texto corto: resumen general del hogar financiero.
+- Boton de menu si el dispositivo usa drawer.
+- Boton cerrar sesion en el shell o encabezado.
+
+Seccion 2: Tarjetas principales.
+- Tarjeta dinero usado.
+- Tarjeta total prestado.
+- Tarjeta intereses generados.
+- Cada tarjeta muestra titulo, valor grande y nota secundaria.
+- Dinero usado se toma de user.balance_display o de resumen calculado para padre.
+- Total prestado se calcula con loans activos o se toma de respuesta si Laravel lo agrega.
+- Intereses generados se toma de GET /api/loans/active-total.
+
+Seccion 3: Resumen de usuarios.
+- Titulo: Resumen de usuarios.
+- Tabla o lista adaptable.
+- Cada fila muestra nombre, nivel, saldo, deuda y estado.
+- Al tocar una fila se abre detalle del integrante usando un texto claro como "Ver detalle de este usuario".
+- Empty state: "Todavia no has creado usuarios".
+
+Seccion 4: Distribucion de deuda.
+- Titulo: Distribucion de deuda.
+- Grafica circular o barras.
+- Lista de usuarios con porcentaje y deuda.
+- Si no hay deuda activa, mostrar "No hay deuda activa por mostrar".
+- Si falla la carga, mostrar "No se pudo cargar la distribucion".
+
+Seccion 5: Ultimos movimientos.
+- Titulo: Ultimos movimientos.
+- Lista de notificaciones recientes.
+- Cada item muestra categoria, texto y fecha corta.
+- Empty state: "Aun no hay movimientos recientes".
+
+Seccion 6: Acceso rapido.
+- Card Nuevo prestamo.
+- Texto: Otorga un prestamo o credito a un miembro de tu familia.
+- Boton: Nuevo prestamo.
+- El boton abre ParentLoansPage en modo crear.
+
+Estados de pantalla
+- Loading inicial para toda la pantalla.
+- Loading parcial para distribucion si tarda.
+- Error por seccion, no bloquear toda la pantalla si solo falla una lista.
+- Pull to refresh para recargar todos los endpoints.
+
+Actualizacion despues de acciones
+- Si vuelve de crear prestamo, dar dinero, mesada o tarea, recargar resumen.
+- Si la accion anterior devolvio balances o totales, mostrar esos datos primero y luego refrescar.

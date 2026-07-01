@@ -25,18 +25,18 @@ class DomusAchievementService
 
     public function unlockBySlug(int $userId, string $slug, array $meta = []): array
     {
-        $mission = DomusMission::query()
+        $badge = DomusMission::query()
             ->where('slug', $slug)
             ->where('is_active', true)
             ->first();
 
-        if (! $mission) {
+        if (! $badge) {
             return [];
         }
 
         $existing = DomusMissionUser::query()
             ->where('user_id', $userId)
-            ->where('domus_mission_id', $mission->id)
+            ->where('domus_mission_id', $badge->id)
             ->first();
 
         if ($existing) {
@@ -44,19 +44,21 @@ class DomusAchievementService
         }
 
         DomusMissionUser::create([
-            'domus_mission_id' => $mission->id,
+            'domus_mission_id' => $badge->id,
             'user_id' => $userId,
-            'awarded_points' => (int) $mission->points_reward,
+            'awarded_points' => (int) $badge->points_reward,
             'completed_at' => now(),
             'meta' => $meta,
         ]);
 
         return [[
-            'id' => $mission->id,
-            'slug' => $mission->slug,
-            'title' => $mission->title,
-            'text' => $mission->description ?: $mission->title,
-            'points_reward' => (int) $mission->points_reward,
+            'id' => $badge->id,
+            'slug' => $badge->slug,
+            'title' => $badge->title,
+            'description' => $badge->description,
+            'text' => $badge->description ?: $badge->title,
+            'image_url' => $this->badgeImageUrl($badge),
+            'points_reward' => (int) $badge->points_reward,
         ]];
     }
 
@@ -67,7 +69,7 @@ class DomusAchievementService
             ->sum('awarded_points');
     }
 
-    public function missionsForUser(int $userId): Collection
+    public function badgesForUser(int $userId): Collection
     {
         $completed = DomusMissionUser::query()
             ->where('user_id', $userId)
@@ -79,19 +81,29 @@ class DomusAchievementService
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get()
-            ->map(function (DomusMission $mission) use ($completed) {
-                $completion = $completed->get($mission->id);
+            ->map(function (DomusMission $badge) use ($completed) {
+                $completion = $completed->get($badge->id);
 
                 return [
-                    'id' => $mission->id,
-                    'slug' => $mission->slug,
-                    'title' => $mission->title,
-                    'description' => $mission->description,
-                    'points_reward' => (int) $mission->points_reward,
+                    'id' => $badge->id,
+                    'slug' => $badge->slug,
+                    'title' => $badge->title,
+                    'description' => $badge->description,
+                    'image_url' => $this->badgeImageUrl($badge),
+                    'points_reward' => (int) $badge->points_reward,
                     'is_completed' => (bool) $completion,
                     'completed_at' => $completion?->completed_at,
                 ];
             })
             ->values();
+    }
+
+    private function badgeImageUrl(DomusMission $badge): ?string
+    {
+        if (! $badge->image_path) {
+            return null;
+        }
+
+        return route('badges.image', ['badge' => $badge->slug]);
     }
 }

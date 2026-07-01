@@ -1,0 +1,58 @@
+DOMUS FLUTTER - PANTALLAS RETIRAR DINERO
+
+Objetivo
+Permitir retiro fisico de dinero del saldo del hijo. El retiro requiere aceptacion de padre e hijo.
+
+Pantallas
+- ParentWithdrawalsPage.
+- ChildWithdrawalsPage.
+- Reutilizar WithdrawalCard, pero mantener paginas y providers separados.
+
+Endpoints
+- GET /api/withdrawals.
+- POST /api/parent/withdrawals.
+- POST /api/child/withdrawals.
+- POST /api/withdrawals/{cashWithdrawal}/accept.
+- POST /api/withdrawals/{cashWithdrawal}/cancel.
+
+Estructura comun
+Seccion 1: Encabezado.
+- Titulo: Retirar dinero.
+- Texto corto que explica que el saldo se reserva al iniciar.
+
+Seccion 2: Mis retiros.
+- Lista de retiros iniciados por el usuario actual.
+- Card muestra monto, estado, fecha de inicio, quien inicio y quien debe aceptar.
+- Empty state: Todavia no has iniciado retiros.
+
+Seccion 3: Solicitudes por aceptar.
+- Lista de retiros donde falta la aceptacion del usuario actual.
+- Card muestra monto, estado, fecha, integrante y solicitante.
+- Boton aceptar si el estado corresponde al usuario actual.
+- Boton cancelar si esta permitido.
+- Empty state: No tienes solicitudes pendientes.
+
+Seccion 4: Iniciar retiro.
+Padre:
+- Boton iniciar retiro.
+- Selector de hijo.
+- Campo monto.
+- Boton solicitar retiro.
+Hijo:
+- Boton iniciar retiro.
+- Campo monto.
+- Boton solicitar retiro.
+
+Estados
+- pending_parent significa esperando al padre.
+- pending_child significa esperando al hijo o integrante.
+- completed significa retirado.
+- canceled significa cancelado.
+
+Actualizacion
+- Crear retiro devuelve withdrawal y child_balance.
+- Aceptar devuelve withdrawal y child_balance.
+- Cancelar devuelve withdrawal y child_balance.
+- Actualizar listas con withdrawal retornado.
+- Actualizar saldo del hijo con child_balance.balance_display si el usuario actual es hijo.
+- Refrescar GET /api/withdrawals despues.

@@ -1,0 +1,54 @@
+DOMUS FLUTTER - MENU DEL PADRE
+
+Objetivo
+Este documento describe el menu principal del padre. Debe ser una estructura estable y clara. No mezclar opciones del hijo en este menu.
+
+Reglas Flutter
+- Crear ParentShell como contenedor principal del rol parent.
+- ParentShell contiene el menu, el encabezado de usuario y el espacio donde se muestra cada pantalla.
+- Cada opcion del menu abre una pagina propia del padre.
+- La opcion activa debe mostrarse resaltada.
+- El menu debe funcionar en telefono con drawer, bottom navigation o rail adaptable, pero las opciones deben ser las mismas.
+
+Datos base del menu
+- Se obtienen con GET /api/me.
+- Mostrar nombre del padre.
+- No mostrar nivel Domus en el perfil del padre.
+- Si el token falla, cerrar sesion local y volver a Login.
+
+Opciones del menu padre
+- Inicio.
+- Usuarios.
+- Prestamos.
+- Dar dinero.
+- Retirar dinero.
+- Mesadas.
+- Cajas de ahorro.
+- Tareas.
+- Puntos Domus.
+- Educacion.
+
+Descripcion de cada opcion
+- Inicio abre ParentHomePage. Muestra resumen general del hogar financiero.
+- Usuarios abre ParentFamilyMembersPage. Muestra hijos/integrantes y permite crear nuevos.
+- Prestamos abre ParentLoansPage. Permite crear prestamos, aprobar solicitudes y revisar deuda.
+- Dar dinero abre ParentTransfersPage. Permite entregar dinero virtual directo al saldo del hijo.
+- Retirar dinero abre ParentWithdrawalsPage. Permite solicitar retiro fisico del saldo del hijo con doble aceptacion.
+- Mesadas abre ParentAllowancesPage. Permite programar pagos recurrentes.
+- Cajas de ahorro abre ParentSavingsBoxesPage. Permite crear cajas y revisar participacion.
+- Tareas abre ParentTasksPage. Permite crear y revisar tareas.
+- Puntos Domus abre ParentDomusPointsPage. Permite crear recompensas y ver canjes.
+- Educacion abre EducationCategoriesPage dentro del shell del padre.
+
+Componentes del menu
+- UserHeader: logo o marca Domus, nombre del padre y boton de cerrar sesion.
+- MenuItem: icono opcional, texto, estado activo.
+- LogoutButton: llama POST /api/logout y borra token local.
+- ContentSlot: area donde aparece la pantalla seleccionada.
+
+Comportamiento
+- El menu no debe recalcular datos de cada pantalla.
+- Cada pantalla carga sus propios datos.
+- El shell puede mantener solo datos globales: token, usuario, rol y nombre.
+- Si una pantalla necesita actualizar el nombre o sesion, debe pedir GET /api/me o usar AuthState.
+

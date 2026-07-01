@@ -1,0 +1,58 @@
+DOMUS FLUTTER - PANTALLA INICIO HIJO
+
+Objetivo
+Mostrar al hijo su situacion personal: saldo, deuda, ahorro, puntos Domus, nivel y movimientos recientes.
+
+Pantalla
+Nombre recomendado: ChildHomePage.
+Se muestra dentro de ChildShell.
+
+Endpoints necesarios
+- GET /api/me.
+- GET /api/notifications?limit=6.
+- GET /api/loans.
+- GET /api/savings-boxes.
+- GET /api/child/goals.
+- GET /api/child/domus-points.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Marca DOMUS.
+- Saludo con nombre del hijo.
+- Texto corto: resumen de tu dinero y progreso.
+- Nivel actual visible en el shell o cerca del saludo.
+
+Seccion 2: Tarjetas principales.
+- Tarjeta dinero disponible.
+- Tarjeta deuda total.
+- Tarjeta ahorros totales.
+- Tarjeta puntos Domus.
+- Dinero disponible viene de /api/me balance_display.
+- Deuda total se calcula con payment_summary.remaining_principal_cents de prestamos.
+- Ahorros totales suma saldo, cajas y metas si la API no manda resumen.
+- Puntos Domus viene de /api/child/domus-points points.available.
+
+Seccion 3: Accesos de accion.
+- Prestamos.
+- Cajas de ahorro.
+- Metas.
+- Retirar dinero.
+- Tareas.
+- Puntos Domus.
+- Educacion.
+- Cada acceso debe tener titulo, descripcion corta y boton.
+
+Seccion 4: Ultimos movimientos.
+- Lista de notificaciones.
+- Cada item muestra categoria, texto y fecha.
+- Empty state: "Aun no hay movimientos recientes".
+
+Estados
+- Loading inicial.
+- Error de sesion vuelve a Login.
+- Error parcial en un modulo muestra tarjeta con mensaje simple.
+
+Actualizacion
+- Si una respuesta trae balance_cents, balance_display, member_balance_cents o new_balance_cents, actualizar tarjeta dinero disponible.
+- Si una respuesta trae domus_points, actualizar puntos y nivel.
+- Si una respuesta trae unlocked_badges, mostrar modal de insignia ganada.

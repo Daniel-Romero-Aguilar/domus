@@ -1,0 +1,56 @@
+DOMUS FLUTTER - PANTALLA PUNTOS DOMUS PADRE
+
+Objetivo
+Padre revisa puntos de hijos, crea recompensas y marca canjes como pagados.
+
+Pantalla
+Nombre recomendado: ParentDomusPointsPage.
+
+Endpoints
+- GET /api/parent/domus-points.
+- POST /api/parent/domus-points/rewards.
+- POST /api/parent/domus-points/redemptions/{redemption}/pay.
+
+Estructura visual
+Seccion 1: Encabezado.
+- Titulo: Puntos Domus.
+- Texto: administra recompensas y canjes.
+
+Seccion 2: Resumen por integrante.
+Cada MemberPointsCard muestra:
+- Nombre.
+- Rol.
+- Puntos historicos.
+- Puntos ganados.
+- Puntos gastados.
+- Puntos disponibles.
+- Nivel actual.
+
+Seccion 3: Recompensas.
+Cada RewardCard muestra:
+- Titulo.
+- Descripcion.
+- Costo en puntos.
+- Estado activa o inactiva.
+- Cantidad de canjes si viene.
+
+Seccion 4: Crear recompensa.
+Formulario:
+- Titulo.
+- Descripcion.
+- Costo en puntos.
+- Boton crear.
+
+Seccion 5: Canjes.
+Cada RedemptionCard muestra:
+- Nombre del hijo.
+- Titulo de recompensa.
+- Puntos gastados.
+- Estado.
+- Fecha.
+- Boton marcar pagado si esta pendiente.
+
+Actualizacion
+- Crear recompensa devuelve reward. Insertar en lista.
+- Marcar pagado devuelve redemption. Actualizar item.
+- Refrescar GET /api/parent/domus-points despues.

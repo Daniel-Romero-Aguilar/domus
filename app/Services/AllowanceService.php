@@ -70,6 +70,10 @@ class AllowanceService
                     'message' => 'Esta mesada ya fue ejecutada para esa fecha.',
                     'allowance' => $allowance->fresh(['parent:id,name', 'child:id,name,username']),
                     'payment' => $payment,
+                    'remaining_parent_balance' => BalanceHelper::parentMoneyUsedCents($allowance->parent),
+                    'remaining_parent_balance_display' => BalanceHelper::displayCents(BalanceHelper::parentMoneyUsedCents($allowance->parent)),
+                    'child_balance_cents' => $payment->child_balance_after === null ? null : (int) $payment->child_balance_after,
+                    'child_balance_display' => $payment->child_balance_after === null ? null : BalanceHelper::displayCents((int) $payment->child_balance_after),
                 ];
             }
 
@@ -174,6 +178,9 @@ class AllowanceService
                 'executed' => true,
                 'message' => 'Mesada ejecutada correctamente.',
                 'remaining_parent_balance' => BalanceHelper::parentMoneyUsedCents($allowance->parent),
+                'remaining_parent_balance_display' => BalanceHelper::displayCents(BalanceHelper::parentMoneyUsedCents($allowance->parent)),
+                'child_balance_cents' => (int) $childBalance->amount,
+                'child_balance_display' => BalanceHelper::displayCents((int) $childBalance->amount),
                 'allowance' => $allowance->fresh(['parent:id,name', 'child:id,name,username']),
                 'payment' => $payment->fresh(),
             ];

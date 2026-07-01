@@ -1,0 +1,82 @@
+DOMUS FLUTTER - PANTALLAS EDUCACION
+
+Objetivo
+Mostrar contenido educativo, cursos, lecciones, quizzes, examenes y premios de puntos.
+
+Pantallas
+- EducationCategoriesPage.
+- EducationCoursesPage.
+- EducationCourseDetailPage.
+- LessonPartAssessmentWidget.
+
+Endpoints
+- GET /api/education/categories.
+- GET /api/education/categories/{category}/courses.
+- GET /api/education/courses/{course}.
+- POST /api/education/lessons/{lesson}/complete.
+- POST /api/education/lesson-parts/{lessonPart}/submit.
+
+EducationCategoriesPage
+Seccion 1: Hero.
+- Titulo desde hero.title.
+- Texto desde hero.text.
+
+Seccion 2: Categorias.
+Cada CategoryCard muestra:
+- Nombre.
+- Descripcion.
+- Cantidad de cursos.
+- Maximo de puntos Domus disponibles.
+- Boton ver cursos.
+
+EducationCoursesPage
+Seccion 1: Encabezado de categoria.
+- Nombre.
+- Descripcion.
+
+Seccion 2: Cursos.
+Cada CourseCard muestra:
+- Titulo.
+- Descripcion.
+- Imagen si image_url existe.
+- Cantidad de lecciones.
+- Resumen de examen si existe.
+- Puntos posibles y puntos ya ganados.
+- Boton abrir curso.
+
+EducationCourseDetailPage
+Seccion 1: Encabezado de curso.
+- Titulo.
+- Descripcion.
+- Imagen si existe.
+- Progreso completado contra total.
+
+Seccion 2: Lista de lecciones.
+Cada LessonItem muestra:
+- Nombre o titulo.
+- Descripcion.
+- Posicion.
+- Estado completada o pendiente.
+- Al tocar, cambia leccion actual.
+
+Seccion 3: Leccion actual.
+- Titulo.
+- Descripcion.
+- Partes en orden.
+- Parte de texto muestra contenido.
+- Parte quiz/exam muestra preguntas.
+- Boton completar leccion.
+
+LessonPartAssessmentWidget
+- Pregunta.
+- Opciones A, B, C y D.
+- Seleccion unica por pregunta.
+- Boton enviar respuestas.
+- Resultado: puntaje, total, porcentaje.
+- Si es examen, mostrar premio de puntos y mensaje.
+
+Actualizacion
+- Completar leccion devuelve lesson_completion y progress. Actualizar progreso sin esperar refresh.
+- Enviar quiz o examen devuelve score, total_questions, percentage, saved y last_result.
+- Si es examen, tambien puede devolver reward, achievements y domus_points.
+- Si domus_points viene, actualizar puntos y nivel del hijo.

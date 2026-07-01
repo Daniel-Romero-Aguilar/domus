@@ -1,14 +1,16 @@
-window.handleDomusAchievements = function handleDomusAchievements(achievements) {
-  if (!Array.isArray(achievements) || achievements.length === 0) {
+window.handleDomusBadges = function handleDomusBadges(badges) {
+  if (!Array.isArray(badges) || badges.length === 0) {
     return;
   }
 
-  achievements.forEach(function (achievement) {
-    const text = achievement && (achievement.text || achievement.title);
+  badges.forEach(function (badge) {
+    const text = badge && (badge.text || badge.title);
     if (!text) {
       return;
     }
 
-    window.alert('Felicidades! Lograste ' + text);
+    window.alert('Felicidades! Ganaste la insignia: ' + text);
   });
 };
+
+window.handleDomusAchievements = window.handleDomusBadges;
