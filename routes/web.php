@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\AdminAuthController;
 use App\Http\Controllers\AdminBadgeController;
+use App\Http\Controllers\LandingController;
+use App\Http\Controllers\AdminLandingEmailController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -11,6 +13,10 @@ Route::get('/', function () {
 Route::view('/login', 'auth-login');
 Route::view('/register', 'auth-register');
 Route::view('/terms', 'terms');
+Route::get('/landing', [LandingController::class, 'show'])->name('landing');
+Route::post('/landing', [LandingController::class, 'store'])
+    ->middleware('throttle:10,1')
+    ->name('landing.email.store');
 Route::view('/account', 'auth-account');
 Route::view('/account/users', 'auth-account-users');
 Route::get('/parent/users/{user}', fn () => view('auth-parent-user-detail'));
@@ -59,6 +65,8 @@ Route::prefix('admin')->group(function () {
 
     Route::middleware('auth:admin_web')->group(function () {
         Route::get('/dashboard', [AdminBadgeController::class, 'dashboard'])->name('admin.dashboard');
+        Route::get('/landing-emails', [AdminLandingEmailController::class, 'index'])->name('admin.landing-emails');
+        Route::get('/landing-emails/export', [AdminLandingEmailController::class, 'export'])->name('admin.landing-emails.export');
         Route::post('/badges/{badge}/image', [AdminBadgeController::class, 'updateImage'])->name('admin.badges.image.update');
         Route::post('/logout', [AdminAuthController::class, 'logout'])->name('admin.logout');
     });

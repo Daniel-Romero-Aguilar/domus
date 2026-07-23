@@ -15,6 +15,9 @@
         .admin-badge-meta{margin:.25rem 0 0;color:#5d6b85;font-size:.9rem;line-height:1.4;}
         .admin-badge-form{margin-top:.85rem;display:flex;flex-wrap:wrap;gap:.65rem;align-items:center;}
         .admin-badge-form .input{max-width:280px;}
+        .admin-menu{display:flex;flex-wrap:wrap;gap:.65rem;margin:1rem 0 1.5rem;padding-bottom:1rem;border-bottom:1px solid #d8e0f2;}
+        .admin-menu a{color:#003c91;font-weight:700;text-decoration:none;}
+        .admin-menu a:hover{text-decoration:underline;}
         @media (max-width:520px){.admin-badge-row{grid-template-columns:1fr}.admin-badge-image{width:100%;height:150px;}}
     </style>
 </head>
@@ -23,6 +26,10 @@
     <p class="brand">DOMUS</p>
     <h1>Admin Dashboard</h1>
     <p class="subtitle">Sesion web robusta activa para administracion interna.</p>
+    <nav class="admin-menu" aria-label="Menu de administracion">
+        <a href="{{ route('admin.dashboard') }}">Insignias</a>
+        <a href="{{ route('admin.landing-emails') }}">Correos de landing</a>
+    </nav>
     @if(session('status'))
         <div class="feedback-box feedback-success mt-1">{{ session('status') }}</div>
     @endif
