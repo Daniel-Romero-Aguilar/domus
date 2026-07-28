@@ -18,7 +18,7 @@ class ChildGoalController extends Controller
         $user = $request->user();
 
         if (! $user || ! in_array($user->role, ['child', 'member'], true)) {
-            return response()->json(['message' => 'Only child/member users can view goals.'], 403);
+            return response()->json(['message' => 'Solo los integrantes pueden consultar metas.'], 403);
         }
 
         $goals = ChildGoal::query()
@@ -40,7 +40,7 @@ class ChildGoalController extends Controller
         $user = $request->user();
 
         if (! $user || ! in_array($user->role, ['child', 'member'], true)) {
-            return response()->json(['message' => 'Only child/member users can create goals.'], 403);
+            return response()->json(['message' => 'Solo los integrantes pueden crear metas.'], 403);
         }
 
         $validated = $request->validate([
@@ -85,11 +85,11 @@ class ChildGoalController extends Controller
         $user = $request->user();
 
         if (! $user || ! in_array($user->role, ['child', 'member'], true)) {
-            return response()->json(['message' => 'Only child/member users can save into goals.'], 403);
+            return response()->json(['message' => 'Solo los integrantes pueden ahorrar en metas.'], 403);
         }
 
         if ((int) $goal->user_id !== (int) $user->id) {
-            return response()->json(['message' => 'This goal does not belong to you.'], 403);
+            return response()->json(['message' => 'Esta meta no te pertenece.'], 403);
         }
 
         if ($goal->status !== 'active') {
@@ -156,7 +156,7 @@ class ChildGoalController extends Controller
         $user = $request->user();
 
         if (! $user || ! in_array($user->role, ['child', 'member'], true)) {
-            return response()->json(['message' => 'Only child/member users can withdraw from goals.'], 403);
+            return response()->json(['message' => 'Solo los integrantes pueden retirar dinero de metas.'], 403);
         }
 
         if ((int) $goal->user_id !== (int) $user->id) {
@@ -227,7 +227,7 @@ class ChildGoalController extends Controller
         $user = $request->user();
 
         if (! $user || ! in_array($user->role, ['child', 'member'], true)) {
-            return response()->json(['message' => 'Only child/member users can complete goals.'], 403);
+            return response()->json(['message' => 'Solo los integrantes pueden completar metas.'], 403);
         }
 
         if ((int) $goal->user_id !== (int) $user->id) {
@@ -259,7 +259,7 @@ class ChildGoalController extends Controller
         $user = $request->user();
 
         if (! $user || ! in_array($user->role, ['child', 'member'], true)) {
-            return response()->json(['message' => 'Only child/member users can cancel goals.'], 403);
+            return response()->json(['message' => 'Solo los integrantes pueden cancelar metas.'], 403);
         }
 
         if ((int) $goal->user_id !== (int) $user->id) {

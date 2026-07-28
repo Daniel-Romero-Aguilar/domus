@@ -26,7 +26,7 @@ class AllowanceController extends Controller
     {
         $parent = $request->user();
         if (! $parent || $parent->role !== 'parent') {
-            return response()->json(['message' => 'Only parent users can view allowances.'], 403);
+            return response()->json(['message' => 'Solo los padres pueden consultar las mesadas.'], 403);
         }
 
         $allowances = Allowance::query()
@@ -77,7 +77,7 @@ class AllowanceController extends Controller
     {
         $parent = $request->user();
         if (! $parent || $parent->role !== 'parent') {
-            return response()->json(['message' => 'Only parent users can create allowances.'], 403);
+            return response()->json(['message' => 'Solo los padres pueden crear mesadas.'], 403);
         }
 
         $validated = $request->validate([
@@ -95,7 +95,7 @@ class AllowanceController extends Controller
             ->exists();
 
         if (! $belongsToParent) {
-            return response()->json(['message' => 'Selected member does not belong to your family.'], 422);
+            return response()->json(['message' => 'El integrante seleccionado no pertenece a tu familia.'], 422);
         }
 
         $firstImmediate = (bool) $validated['first_payment_immediate'];
@@ -155,11 +155,11 @@ class AllowanceController extends Controller
     {
         $parent = $request->user();
         if (! $parent || $parent->role !== 'parent') {
-            return response()->json(['message' => 'Only parent users can execute allowances.'], 403);
+            return response()->json(['message' => 'Solo los padres pueden ejecutar mesadas.'], 403);
         }
 
         if ($allowance->parent_user_id !== $parent->id) {
-            return response()->json(['message' => 'Allowance does not belong to your account.'], 403);
+            return response()->json(['message' => 'Esta mesada no pertenece a tu cuenta.'], 403);
         }
 
         $result = $this->allowanceService->execute($allowance->id, true);

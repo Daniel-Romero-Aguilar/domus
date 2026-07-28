@@ -36,7 +36,7 @@ class AuthController extends Controller
         $token = $user->createToken('parent-auth-token')->plainTextToken;
 
         return response()->json([
-            'message' => 'Parent account created successfully.',
+            'message' => 'Cuenta de padre creada correctamente.',
             'token' => $token,
             'user' => [
                 'id' => $user->id,
@@ -61,14 +61,14 @@ class AuthController extends Controller
 
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
             return response()->json([
-                'message' => 'Invalid credentials.',
+                'message' => 'Las credenciales no son válidas.',
             ], 401);
         }
 
         $token = $user->createToken('parent-auth-token')->plainTextToken;
 
         return response()->json([
-            'message' => 'Login successful.',
+            'message' => 'Inicio de sesión exitoso.',
             'token' => $token,
             'user' => [
                 'id' => $user->id,
@@ -126,7 +126,7 @@ class AuthController extends Controller
         }
 
         return response()->json([
-            'message' => 'Token revoked.',
+            'message' => 'Token revocado.',
         ]);
     }
 }

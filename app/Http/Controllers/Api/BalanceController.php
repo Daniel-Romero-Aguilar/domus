@@ -89,7 +89,7 @@ class BalanceController extends Controller
         });
 
         return response()->json([
-            'message' => 'Balance updated.',
+            'message' => 'Saldo actualizado.',
             'data' => $payload,
             'balance_cents' => $payload['balance_cents'],
             'balance_display' => $payload['balance_display'],

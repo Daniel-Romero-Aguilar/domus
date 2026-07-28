@@ -13,11 +13,11 @@ class DomusNotificationController extends Controller
     {
         $user = $request->user();
         if (! $user) {
-            return response()->json(['message' => 'Authentication required.'], 401);
+            return response()->json(['message' => 'Se requiere autenticación.'], 401);
         }
 
         if (! in_array($user->role, ['parent', 'child', 'member'], true)) {
-            return response()->json(['message' => 'Only family users can view notifications.'], 403);
+            return response()->json(['message' => 'Solo los usuarios de la familia pueden consultar notificaciones.'], 403);
         }
 
         $limit = min(50, max(1, (int) $request->query('limit', 20)));
