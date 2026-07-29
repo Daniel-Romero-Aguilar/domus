@@ -15,7 +15,6 @@ use App\Services\LoanPaymentService;
 use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Carbon;
@@ -185,8 +184,7 @@ class LoanController extends Controller
     {
         $actor = $request->user();
 
-        try {
-            $validated = $request->validate([
+        $validated = $request->validate([
             'child_user_id' => ['required', 'integer', 'exists:users,id'],
             'amount' => ['required', 'integer', 'min:1'],
             'reason' => ['nullable', 'string', 'max:120'],
@@ -197,11 +195,7 @@ class LoanController extends Controller
             'interest_mode' => ['nullable', 'in:percent,fixed'],
             'annual_interest_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'fixed_interest_amount' => ['nullable', 'integer', 'min:0'],
-            ]);
-        } catch (ValidationException $exception) {
-            $this->logLoanRequestFailure($request, $actor, 'validation', $exception);
-            throw $exception;
-        }
+        ]);
 
         $parentId = null;
         $childId = null;
@@ -229,10 +223,6 @@ class LoanController extends Controller
 
             $isChildOfParent = true;
         } else {
-            Log::error('LOANS_STORE_FORBIDDEN: Invalid role for loan creation.', [
-                'actor_id' => $actor->id,
-                'actor_role' => $actor->role,
-            ]);
             return response()->json(['message' => 'Invalid role for loan creation.'], 403);
         }
         if (! $isChildOfParent) {
@@ -270,8 +260,7 @@ class LoanController extends Controller
         ];
 
         if (in_array($actor->role, ['child', 'member'], true)) {
-            try {
-                $loan = DB::transaction(function () use ($actor, $parentId, $loanData): Loan {
+            $loan = DB::transaction(function () use ($actor, $parentId, $loanData): Loan {
                     $loan = Loan::create([
                         'parent_user_id' => $parentId,
                         ...$loanData,
@@ -285,11 +274,7 @@ class LoanController extends Controller
                     $this->notifications->recordForParent($parentId, 'solicitud', 'prestamos', $actor->name.' solicito un prestamo por '.$amountText.'.');
 
                     return $loan;
-                });
-            } catch (\Throwable $exception) {
-                $this->logLoanRequestFailure($request, $actor, 'member_request_transaction', $exception, $loanData);
-                throw $exception;
-            }
+            });
 
             return response()->json([
                 'message' => 'Loan request submitted and pending approval.',
@@ -358,7 +343,6 @@ class LoanController extends Controller
                 ];
                 });
             } catch (\Throwable $exception) {
-                $this->logLoanRequestFailure($request, $actor, 'parent_offer_transaction', $exception, $loanData);
                 if ($exception->getMessage() === 'INSUFFICIENT_BALANCE') {
                     return response()->json(['message' => 'No se pudo crear este prestamo.'], 422);
                 }
@@ -732,25 +716,4 @@ class LoanController extends Controller
         return $loan;
     }
 
-    private function logLoanRequestFailure(
-        Request $request,
-        $actor,
-        string $stage,
-        \Throwable $exception,
-        array $loanData = []
-    ): void {
-        Log::warning('PRESTAMO SOLICITADO FALLIDO', [
-            'stage' => $stage,
-            'endpoint' => $request->method().' '.$request->path(),
-            'actor_id' => $actor?->id,
-            'actor_role' => $actor?->role,
-            'request_data' => $request->except(['password', 'token']),
-            'loan_data' => $loanData,
-            'exception_class' => $exception::class,
-            'error' => $exception->getMessage(),
-            'file' => $exception->getFile(),
-            'line' => $exception->getLine(),
-            'trace' => $exception->getTraceAsString(),
-        ]);
-    }
 }
