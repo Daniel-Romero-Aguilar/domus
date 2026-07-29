@@ -15,6 +15,7 @@ use App\Services\LoanPaymentService;
 use App\Support\BalanceHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Carbon;
@@ -184,7 +185,8 @@ class LoanController extends Controller
     {
         $actor = $request->user();
 
-        $validated = $request->validate([
+        try {
+            $validated = $request->validate([
             'child_user_id' => ['required', 'integer', 'exists:users,id'],
             'amount' => ['required', 'integer', 'min:1'],
             'reason' => ['nullable', 'string', 'max:120'],
@@ -195,7 +197,11 @@ class LoanController extends Controller
             'interest_mode' => ['nullable', 'in:percent,fixed'],
             'annual_interest_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'fixed_interest_amount' => ['nullable', 'integer', 'min:0'],
-        ]);
+            ]);
+        } catch (ValidationException $exception) {
+            $this->logLoanRequestFailure($request, $actor, 'validation', $exception);
+            throw $exception;
+        }
 
         $parentId = null;
         $childId = null;
@@ -264,31 +270,26 @@ class LoanController extends Controller
         ];
 
         if (in_array($actor->role, ['child', 'member'], true)) {
-            $loan = DB::transaction(function () use ($actor, $parentId, $loanData): Loan {
-                $loan = Loan::create([
-                    'parent_user_id' => $parentId,
-                    ...$loanData,
-                    'status' => 'pending',
-                    'requested_by_user_id' => $actor->id,
-                ])->load('child:id,name,username');
-                $this->loanPayments->ensurePaymentsForLoan($loan);
+            try {
+                $loan = DB::transaction(function () use ($actor, $parentId, $loanData): Loan {
+                    $loan = Loan::create([
+                        'parent_user_id' => $parentId,
+                        ...$loanData,
+                        'status' => 'pending',
+                        'requested_by_user_id' => $actor->id,
+                    ])->load('child:id,name,username');
+                    $this->loanPayments->ensurePaymentsForLoan($loan);
 
-                $amountText = $this->notifications->money((int) $loan->amount * 100);
-                $this->notifications->recordForMember(
-                    $actor->id,
-                    'solicitud',
-                    'prestamos',
-                    'Solicitaste un prestamo por '.$amountText.'.'
-                );
-                $this->notifications->recordForParent(
-                    $parentId,
-                    'solicitud',
-                    'prestamos',
-                    $actor->name.' solicito un prestamo por '.$amountText.'.'
-                );
+                    $amountText = $this->notifications->money((int) $loan->amount * 100);
+                    $this->notifications->recordForMember($actor->id, 'solicitud', 'prestamos', 'Solicitaste un prestamo por '.$amountText.'.');
+                    $this->notifications->recordForParent($parentId, 'solicitud', 'prestamos', $actor->name.' solicito un prestamo por '.$amountText.'.');
 
-                return $loan;
-            });
+                    return $loan;
+                });
+            } catch (\Throwable $exception) {
+                $this->logLoanRequestFailure($request, $actor, 'member_request_transaction', $exception, $loanData);
+                throw $exception;
+            }
 
             return response()->json([
                 'message' => 'Loan request submitted and pending approval.',
@@ -356,7 +357,8 @@ class LoanController extends Controller
                     'remaining_balance' => $parentMoneyUsedAfter,
                 ];
                 });
-            } catch (\RuntimeException $exception) {
+            } catch (\Throwable $exception) {
+                $this->logLoanRequestFailure($request, $actor, 'parent_offer_transaction', $exception, $loanData);
                 if ($exception->getMessage() === 'INSUFFICIENT_BALANCE') {
                     return response()->json(['message' => 'No se pudo crear este prestamo.'], 422);
                 }
@@ -728,5 +730,27 @@ class LoanController extends Controller
         $loan->setAttribute('payment_summary', $summary);
 
         return $loan;
+    }
+
+    private function logLoanRequestFailure(
+        Request $request,
+        $actor,
+        string $stage,
+        \Throwable $exception,
+        array $loanData = []
+    ): void {
+        Log::warning('PRESTAMO SOLICITADO FALLIDO', [
+            'stage' => $stage,
+            'endpoint' => $request->method().' '.$request->path(),
+            'actor_id' => $actor?->id,
+            'actor_role' => $actor?->role,
+            'request_data' => $request->except(['password', 'token']),
+            'loan_data' => $loanData,
+            'exception_class' => $exception::class,
+            'error' => $exception->getMessage(),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'trace' => $exception->getTraceAsString(),
+        ]);
     }
 }
