@@ -145,7 +145,7 @@ class AllowanceController extends Controller
         }
 
         return response()->json([
-            'message' => $result['message'] ?? 'Allowance created successfully.',
+            'message' => $result['message'] ?? 'Mesada creada correctamente.',
             'allowance' => $allowance->load(['child:id,name,username', 'parent:id,name']),
             'result' => $result,
         ], 201);

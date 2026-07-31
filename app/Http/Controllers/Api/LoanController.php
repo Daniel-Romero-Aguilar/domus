@@ -13,6 +13,7 @@ use App\Services\DomusNotificationService;
 use App\Services\DomusPointsAccountService;
 use App\Services\LoanPaymentService;
 use App\Support\BalanceHelper;
+use App\Support\LoanAmountGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -244,6 +245,16 @@ class LoanController extends Controller
 
         $total = (int) round($amount * (1 + ($rate / 100)));
         $installmentAmount = (int) ceil($total / (int) $validated['installments_count']);
+
+        if (! LoanAmountGuard::isPositive($amount, $total, $installmentAmount)) {
+            return response()->json([
+                'message' => 'No se pudo crear la solicitud de prestamo porque el monto debe ser mayor que cero.',
+                'errors' => [
+                    'amount' => ['El monto del prestamo debe ser un entero mayor que cero.'],
+                ],
+            ], 422);
+        }
+
         $loanData = [
             'child_user_id' => $childId,
             'amount' => $amount,
@@ -260,87 +271,95 @@ class LoanController extends Controller
         ];
 
         if (in_array($actor->role, ['child', 'member'], true)) {
-            $loan = DB::transaction(function () use ($actor, $parentId, $loanData): Loan {
-                    $loan = Loan::create([
-                        'parent_user_id' => $parentId,
-                        ...$loanData,
-                        'status' => 'pending',
-                        'requested_by_user_id' => $actor->id,
-                    ])->load('child:id,name,username');
-                    $this->loanPayments->ensurePaymentsForLoan($loan);
+            $loan = DB::transaction(function () use ($actor, $parentId, $loanData): array {
+                $loan = Loan::create([
+                    'parent_user_id' => $parentId,
+                    ...$loanData,
+                    'status' => 'pending',
+                    'requested_by_user_id' => $actor->id,
+                ]);
 
-                    $amountText = $this->notifications->money((int) $loan->amount * 100);
-                    $this->notifications->recordForMember($actor->id, 'solicitud', 'prestamos', 'Solicitaste un prestamo por '.$amountText.'.');
-                    $this->notifications->recordForParent($parentId, 'solicitud', 'prestamos', $actor->name.' solicito un prestamo por '.$amountText.'.');
+                $loan = $this->reloadAndVerifyLoanAmounts($loan, $loanData)
+                    ->load('child:id,name,username');
 
-                    return $loan;
+                $this->loanPayments->ensurePaymentsForLoan($loan);
+
+                $amountText = $this->notifications->money((int) $loan->amount * 100);
+                $this->notifications->recordForMember($actor->id, 'solicitud', 'prestamos', 'Solicitaste un prestamo por '.$amountText.'.');
+                $this->notifications->recordForParent($parentId, 'solicitud', 'prestamos', $actor->name.' solicito un prestamo por '.$amountText.'.');
+
+                // Prepare the complete response before the transaction commits.
+                // If presentation fails, the loan and notifications are rolled back.
+                return $this->presentLoan($loan)->toArray();
             });
 
             return response()->json([
-                'message' => 'Loan request submitted and pending approval.',
-                'loan' => $this->presentLoan($loan),
+                'message' => 'Solicitud de prestamo enviada y pendiente de aprobacion.',
+                'loan' => $loan,
             ], 201);
         }
 
         if ($actor->role === 'parent') {
             try {
                 $payload = DB::transaction(function () use ($actor, $parentId, $loanData) {
-                $loan = Loan::create([
-                    'parent_user_id' => $parentId,
-                    ...$loanData,
-                    'status' => 'offered',
-                    'requested_by_user_id' => $parentId,
-                ]);
-                $this->loanPayments->ensurePaymentsForLoan($loan);
-                $loanAmountCents = (int) $loan->amount * 100;
-
-                $balance = Balance::query()
-                    ->where('user_id', $parentId)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (! $balance) {
-                    $balance = Balance::create([
-                        'user_id' => $parentId,
-                        'amount' => 0,
+                    $loan = Loan::create([
+                        'parent_user_id' => $parentId,
+                        ...$loanData,
+                        'status' => 'offered',
+                        'requested_by_user_id' => $parentId,
                     ]);
+                    $loan = $this->reloadAndVerifyLoanAmounts($loan, $loanData);
+                    $this->loanPayments->ensurePaymentsForLoan($loan);
+                    $loanAmountCents = (int) $loan->amount * 100;
+
                     $balance = Balance::query()
                         ->where('user_id', $parentId)
                         ->lockForUpdate()
-                        ->firstOrFail();
-                }
+                        ->first();
 
-                $parentMoneyUsedBefore = BalanceHelper::parentMoneyUsedCents($actor);
-                $parentMoneyUsedAfter = $parentMoneyUsedBefore + $loanAmountCents;
+                    if (! $balance) {
+                        $balance = Balance::create([
+                            'user_id' => $parentId,
+                            'amount' => 0,
+                        ]);
+                        $balance = Balance::query()
+                            ->where('user_id', $parentId)
+                            ->lockForUpdate()
+                            ->firstOrFail();
+                    }
 
-                $balance->movements()->create([
-                    'amount_added' => $loanAmountCents,
-                    'movement_type' => 'loan_reserve',
-                    'note' => 'Loan offered while waiting for child response',
-                    'resulting_balance' => $parentMoneyUsedAfter,
-                ]);
+                    $parentMoneyUsedBefore = BalanceHelper::parentMoneyUsedCents($actor);
+                    $parentMoneyUsedAfter = $parentMoneyUsedBefore + $loanAmountCents;
 
-                $loan = $loan->fresh(['child:id,name,username']);
-                $amountText = $this->notifications->money((int) $loan->amount * 100);
-                $childName = $loan->child?->name ?? 'un integrante';
+                    $balance->movements()->create([
+                        'amount_added' => $loanAmountCents,
+                        'movement_type' => 'loan_reserve',
+                        'note' => 'Loan offered while waiting for child response',
+                        'resulting_balance' => $parentMoneyUsedAfter,
+                    ]);
 
-                $this->notifications->recordForParent(
-                    $parentId,
-                    'oferta',
-                    'prestamos',
-                    'Ofreciste un prestamo por '.$amountText.' a '.$childName.'.'
-                );
-                $this->notifications->recordForMember(
-                    $loan->child_user_id,
-                    'oferta',
-                    'prestamos',
-                    'Recibiste una oferta de prestamo por '.$amountText.'.'
-                );
+                    $loan = $loan->fresh(['child:id,name,username']);
+                    $amountText = $this->notifications->money((int) $loan->amount * 100);
+                    $childName = $loan->child?->name ?? 'un integrante';
 
-                return [
-                    'loan' => $loan,
-                    'remaining_balance' => $parentMoneyUsedAfter,
-                ];
+                    $this->notifications->recordForParent(
+                        $parentId,
+                        'oferta',
+                        'prestamos',
+                        'Ofreciste un prestamo por '.$amountText.' a '.$childName.'.'
+                    );
+                    $this->notifications->recordForMember(
+                        $loan->child_user_id,
+                        'oferta',
+                        'prestamos',
+                        'Recibiste una oferta de prestamo por '.$amountText.'.'
+                    );
+
+                    // The response payload is built before the transaction commits.
+                    return [
+                        'loan' => $this->presentLoan($loan)->toArray(),
+                        'remaining_balance' => $parentMoneyUsedAfter,
+                    ];
                 });
             } catch (\Throwable $exception) {
                 if ($exception->getMessage() === 'INSUFFICIENT_BALANCE') {
@@ -351,35 +370,14 @@ class LoanController extends Controller
             }
 
             return response()->json([
-                'message' => 'Loan offer created successfully.',
-                'loan' => $this->presentLoan($payload['loan']),
+                'message' => 'Oferta de prestamo creada correctamente.',
+                'loan' => $payload['loan'],
                 'remaining_balance' => $payload['remaining_balance'],
                 'remaining_balance_display' => BalanceHelper::displayCents((int) $payload['remaining_balance']),
             ], 201);
         }
 
-        $loan = Loan::create([
-            'parent_user_id' => $parentId,
-            'child_user_id' => $childId,
-            'amount' => $amount,
-            'reason' => $validated['reason'] ?? null,
-            'due_date' => $validated['due_date'],
-            'installments_count' => (int) $validated['installments_count'],
-            'installment_frequency' => $validated['installment_frequency'],
-            'has_interest' => (bool) $validated['has_interest'],
-            'interest_mode' => $interestMode,
-            'annual_interest_rate' => $rate,
-            'fixed_interest_amount' => $fixedInterestAmount,
-            'status' => 'pending',
-            'requested_by_user_id' => $actor->id,
-            'total_amount' => $total,
-            'installment_amount' => $installmentAmount,
-        ])->load('child:id,name,username');
-
-        return response()->json([
-            'message' => 'Loan request submitted and pending approval.',
-            'loan' => $this->presentLoan($loan),
-        ], 201);
+        return response()->json(['message' => 'Invalid role for loan creation.'], 403);
     }
 
     public function approve(Request $request, Loan $loan): JsonResponse
@@ -714,6 +712,30 @@ class LoanController extends Controller
         $loan->setAttribute('payment_summary', $summary);
 
         return $loan;
+    }
+
+    private function reloadAndVerifyLoanAmounts(Loan $loan, array $expectedData): Loan
+    {
+        $persistedLoan = Loan::query()
+            ->whereKey($loan->id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        LoanAmountGuard::assertMatches(
+            [
+                'amount' => $expectedData['amount'] ?? 0,
+                'total_amount' => $expectedData['total_amount'] ?? 0,
+                'installment_amount' => $expectedData['installment_amount'] ?? 0,
+            ],
+            [
+                'amount' => $persistedLoan->getRawOriginal('amount'),
+                'total_amount' => $persistedLoan->getRawOriginal('total_amount'),
+                'installment_amount' => $persistedLoan->getRawOriginal('installment_amount'),
+            ],
+            'after_loan_insert_reload'
+        );
+
+        return $persistedLoan;
     }
 
 }

@@ -154,7 +154,7 @@ class SavingsBoxController extends Controller
         });
 
         return response()->json([
-            'message' => 'Savings box created successfully.',
+            'message' => 'Caja de ahorro creada correctamente.',
             'savings_box' => $box->load(['members:id,name,username', 'accounts.user:id,name,username']),
         ], 201);
     }

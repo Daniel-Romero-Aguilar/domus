@@ -69,6 +69,14 @@ class LogFailedUserActions
             $context['line'] = $exception->getLine();
             $context['trace'] = $exception->getTraceAsString();
 
+            $prefix = 'LOAN_AMOUNT_TRANSFORMATION_FAILED: ';
+            if (str_starts_with($exception->getMessage(), $prefix)) {
+                $details = json_decode(substr($exception->getMessage(), strlen($prefix)), true);
+                if (is_array($details)) {
+                    $context['diagnostic'] = $details;
+                }
+            }
+
             if ($exception instanceof ValidationException) {
                 $context['validation_errors'] = $exception->errors();
             }

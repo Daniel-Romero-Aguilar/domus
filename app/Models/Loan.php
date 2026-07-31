@@ -5,11 +5,45 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Support\LoanAmountGuard;
 
 class Loan extends Model
 {
+    protected static function booted(): void
+    {
+        static::saving(function (Loan $loan): void {
+            // Existing legacy rows are not rewritten just because another
+            // attribute changes, but every new monetary value must be > 0.
+            $fields = ['amount', 'total_amount', 'installment_amount'];
+            if ($loan->exists && ! collect($fields)->contains(fn (string $field): bool => $loan->isDirty($field))) {
+                return;
+            }
+
+            LoanAmountGuard::assertPositive(
+                (int) $loan->getAttribute('amount'),
+                (int) $loan->getAttribute('total_amount'),
+                (int) $loan->getAttribute('installment_amount'),
+            );
+        });
+    }
+
     protected $appends = [
         'installment_plan',
+    ];
+
+    protected $casts = [
+        'parent_user_id' => 'integer',
+        'child_user_id' => 'integer',
+        'amount' => 'integer',
+        'due_date' => 'date',
+        'installments_count' => 'integer',
+        'has_interest' => 'boolean',
+        'annual_interest_rate' => 'float',
+        'fixed_interest_amount' => 'integer',
+        'responded_at' => 'datetime',
+        'requested_by_user_id' => 'integer',
+        'total_amount' => 'integer',
+        'installment_amount' => 'integer',
     ];
 
     protected $fillable = [
