@@ -29,6 +29,7 @@
     <p class="subtitle">Registros de familias interesadas en DOMUS.</p>
 
     <nav class="admin-menu" aria-label="Menu de administracion">
+        <a href="{{ route('admin.families.index') }}">Familias</a>
         <a href="{{ route('admin.dashboard') }}">Insignias</a>
         <a href="{{ route('admin.landing-emails') }}">Correos de landing</a>
     </nav>

@@ -27,6 +27,7 @@
     <h1>Admin Dashboard</h1>
     <p class="subtitle">Sesion web robusta activa para administracion interna.</p>
     <nav class="admin-menu" aria-label="Menu de administracion">
+        <a href="{{ route('admin.families.index') }}">Familias</a>
         <a href="{{ route('admin.dashboard') }}">Insignias</a>
         <a href="{{ route('admin.landing-emails') }}">Correos de landing</a>
     </nav>
