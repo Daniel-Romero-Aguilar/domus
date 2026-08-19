@@ -476,6 +476,12 @@ For new boxes, the plan is frozen when it is created. `duration_months`, `durati
 `SavingsBoxAccount` = `{ id: integer, savings_box_id: integer, user_id: integer, principal_cents: integer, principal_pending_cents: integer, earned_interest_cents: integer, settled_principal_cents: integer, settled_benefit_cents: integer, settled_total_cents: integer, interest_remainder_microcents: integer, last_interest_accrued_on: string|null, interest_accrued_until_at: string|null, settled_at: string|null, current_cycle_number: integer|null, deposited_in_current_cycle_cents: integer|null, remaining_in_current_cycle_cents: integer|null, remaining_total_capacity_cents: integer|null, created_at: string, updated_at: string, user: UserChild|null }`.
 The cycle usage fields are runtime values added by the GET response for new-plan accounts. Settlement fields remain zero/null until the final payout.
 
+GET /api/savings-boxes/creation-options
+Auth: parent
+Success `200`: `{ "creation_options": { "plan_version": "fixed_days_ceil_v1", "is_preview": true, "preview_starts_at": "ISO-8601 datetime", "cycle_days": integer, "cycle_label": string, "months_available": integer[], "duration_options": [{ "duration_months": integer, "label": string, "duration_days_preview": integer, "cycle_count_preview": integer, "max_total_multiplier_preview": integer, "cutoff_at_preview": "ISO-8601 datetime" }] } }`.
+Use this read-only endpoint to initialize the new-box form before a box exists. `cycle_days` is the current configured cycle length (for example `14`) and `cycle_label` is ready to display (for example `Cada 14 días`). Each duration option previews how many cycles that calendar duration would produce if created at `preview_starts_at`. `max_total_multiplier_preview` equals the preview cycle count, so the client may preview `max_per_cycle * max_total_multiplier_preview`.
+The endpoint creates no database records. Preview dates and counts can change if the box is created later; the authoritative values are always those returned and persisted by `POST /api/savings-boxes`.
+
 POST /api/savings-boxes
 Auth: parent
 Body: name, duration_months, max_per_cycle, benefit_percent, allow_early_withdrawal, audience, member_user_ids[]

@@ -10,6 +10,8 @@ class SavingsBoxPlanService
 {
     private const SECONDS_PER_DAY = 86400;
 
+    private const PLAN_VERSION = 'fixed_days_ceil_v1';
+
     /** @return array<int, int> */
     public function availableMonths(): array
     {
@@ -25,6 +27,45 @@ class SavingsBoxPlanService
     public function configuredCycleDays(): int
     {
         return max(1, (int) config('savings_box.days_per_cycle', 14));
+    }
+
+    /**
+     * Values for a new-box form. These are only a preview; store() persists
+     * the authoritative snapshot using the exact creation timestamp.
+     *
+     * @return array<string, mixed>
+     */
+    public function creationOptions(?Carbon $startsAt = null): array
+    {
+        $startsAt = ($startsAt ?? Carbon::now())->copy()->startOfSecond();
+        $cycleDays = $this->configuredCycleDays();
+        $availableMonths = $this->availableMonths();
+
+        $durationOptions = collect($availableMonths)
+            ->map(function (int $months) use ($startsAt, $cycleDays): array {
+                $snapshot = $this->snapshot($startsAt, $months, 1, $cycleDays);
+
+                return [
+                    'duration_months' => $months,
+                    'label' => $months === 1 ? '1 mes' : $months.' meses',
+                    'duration_days_preview' => $snapshot['duration_days'],
+                    'cycle_count_preview' => $snapshot['cycle_count'],
+                    'max_total_multiplier_preview' => $snapshot['cycle_count'],
+                    'cutoff_at_preview' => $snapshot['cutoff_at']->toIso8601String(),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'plan_version' => self::PLAN_VERSION,
+            'is_preview' => true,
+            'preview_starts_at' => $startsAt->toIso8601String(),
+            'cycle_days' => $cycleDays,
+            'cycle_label' => $cycleDays === 1 ? 'Cada día' : 'Cada '.$cycleDays.' días',
+            'months_available' => $availableMonths,
+            'duration_options' => $durationOptions,
+        ];
     }
 
     /**
@@ -66,7 +107,7 @@ class SavingsBoxPlanService
             'duration_days' => $durationDays,
             'cycle_days' => $cycleDays,
             'cycle_count' => $cycleCount,
-            'plan_version' => 'fixed_days_ceil_v1',
+            'plan_version' => self::PLAN_VERSION,
             'max_per_cycle_cents' => $maxPerCycleCents,
             'max_amount_cents' => $maxPerCycleCents * $cycleCount,
             'starts_at' => $startsAt->copy(),

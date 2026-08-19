@@ -26,6 +26,18 @@ class SavingsBoxController extends Controller
         private readonly DomusNotificationService $notifications
     ) {}
 
+    public function creationOptions(Request $request): JsonResponse
+    {
+        $parent = $request->user();
+        if (! $parent || $parent->role !== 'parent') {
+            return response()->json(['message' => 'Only parent users can view savings box creation options.'], 403);
+        }
+
+        return response()->json([
+            'creation_options' => $this->planService->creationOptions(Carbon::now()),
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();

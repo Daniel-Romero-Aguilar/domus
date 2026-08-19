@@ -55,6 +55,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/allowances', [AllowanceController::class, 'store']);
     Route::patch('/allowances/{allowance}', [AllowanceController::class, 'update']);
     Route::post('/allowances/{allowance}/execute', [AllowanceController::class, 'execute']);
+    Route::get('/savings-boxes/creation-options', [SavingsBoxController::class, 'creationOptions']);
     Route::get('/savings-boxes', [SavingsBoxController::class, 'index']);
     Route::post('/savings-boxes', [SavingsBoxController::class, 'store']);
     Route::post('/savings-boxes/{savingsBox}/deposit', [SavingsBoxController::class, 'deposit']);

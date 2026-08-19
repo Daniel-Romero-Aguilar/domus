@@ -21,6 +21,33 @@ class SavingsBoxLimitTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_parent_can_load_creation_options_without_creating_a_box(): void
+    {
+        Carbon::setTestNow('2026-01-31 10:00:00');
+        config()->set('savings_box.months_available', [1, 3]);
+        config()->set('savings_box.days_per_cycle', 14);
+        [$parent, $child] = $this->familyWithChildren(1);
+
+        $this->actingAs($parent, 'sanctum')
+            ->getJson('/api/savings-boxes/creation-options')
+            ->assertOk()
+            ->assertJsonPath('creation_options.plan_version', 'fixed_days_ceil_v1')
+            ->assertJsonPath('creation_options.is_preview', true)
+            ->assertJsonPath('creation_options.cycle_days', 14)
+            ->assertJsonPath('creation_options.cycle_label', 'Cada 14 días')
+            ->assertJsonPath('creation_options.months_available', [1, 3])
+            ->assertJsonPath('creation_options.duration_options.0.duration_months', 1)
+            ->assertJsonPath('creation_options.duration_options.0.duration_days_preview', 28)
+            ->assertJsonPath('creation_options.duration_options.0.cycle_count_preview', 2)
+            ->assertJsonPath('creation_options.duration_options.0.max_total_multiplier_preview', 2);
+
+        $this->assertDatabaseCount('savings_boxes', 0);
+
+        $this->actingAs($child, 'sanctum')
+            ->getJson('/api/savings-boxes/creation-options')
+            ->assertForbidden();
+    }
+
     public function test_creation_freezes_the_calculated_plan_in_the_database(): void
     {
         Carbon::setTestNow('2026-01-31 10:00:00');

@@ -1,48 +1,63 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es-MX">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard</title>
-    <link rel="stylesheet" href="/css/styles.css">
-    <style>
-        .admin-badge-list{display:grid;gap:1rem;margin-top:1.5rem;}
-        .admin-badge-card{padding:1rem;border:1px solid #d8e0f2;border-radius:.85rem;background:#f8fafc;color:#10234a;}
-        .admin-badge-row{display:grid;grid-template-columns:96px minmax(0,1fr);gap:1rem;align-items:start;}
-        .admin-badge-image{width:96px;height:96px;border-radius:.9rem;object-fit:cover;background:#e9eef8;border:1px solid #d8e0f2;}
-        .admin-badge-placeholder{display:grid;place-items:center;text-align:center;color:#6b7a99;font-size:.78rem;font-weight:700;}
-        .admin-badge-title{margin:0;color:#001f5b;font-size:1rem;font-weight:800;}
-        .admin-badge-meta{margin:.25rem 0 0;color:#5d6b85;font-size:.9rem;line-height:1.4;}
-        .admin-badge-form{margin-top:.85rem;display:flex;flex-wrap:wrap;gap:.65rem;align-items:center;}
-        .admin-badge-form .input{max-width:280px;}
-        .admin-menu{display:flex;flex-wrap:wrap;gap:.65rem;margin:1rem 0 1.5rem;padding-bottom:1rem;border-bottom:1px solid #d8e0f2;}
-        .admin-menu a{color:#003c91;font-weight:700;text-decoration:none;}
-        .admin-menu a:hover{text-decoration:underline;}
-        @media (max-width:520px){.admin-badge-row{grid-template-columns:1fr}.admin-badge-image{width:100%;height:150px;}}
-    </style>
+    <meta name="theme-color" content="#0d1b3d">
+    <title>Insignias | Admin DOMUS</title>
+    <link rel="stylesheet" href="{{ asset('css/admin.css') }}">
 </head>
-<body class="app-bg">
-<section class="page card">
-    <p class="brand">DOMUS</p>
-    <h1>Admin Dashboard</h1>
-    <p class="subtitle">Sesion web robusta activa para administracion interna.</p>
-    <nav class="admin-menu" aria-label="Menu de administracion">
-        <a href="{{ route('admin.families.index') }}">Familias</a>
-        <a href="{{ route('admin.dashboard') }}">Insignias</a>
-        <a href="{{ route('admin.landing-emails') }}">Correos de landing</a>
-    </nav>
+<body class="domus-admin">
+<header class="da-header">
+    <div class="da-shell da-header__inner">
+        <a class="da-brand" href="{{ route('admin.dashboard') }}" aria-label="DOMUS administraci&oacute;n">
+            <img src="{{ asset('img/domus_logo.png') }}" alt="DOMUS">
+            <span>Administraci&oacute;n</span>
+        </a>
+        <nav class="da-navigation" aria-label="Navegaci&oacute;n administrativa">
+            <a href="{{ route('admin.families.index') }}">Familias</a>
+            <a class="is-active" href="{{ route('admin.dashboard') }}">Insignias</a>
+            <a href="{{ route('admin.landing-emails') }}">Correos</a>
+        </nav>
+        <form method="POST" action="{{ route('admin.logout') }}">
+            @csrf
+            <button class="da-logout" type="submit">Cerrar sesi&oacute;n</button>
+        </form>
+    </div>
+</header>
+
+<main class="da-shell da-main da-badges-main">
+    <section class="da-hero da-badges-hero" aria-labelledby="admin-badges-title">
+        <div>
+            <span class="da-eyebrow"><span aria-hidden="true">&#10022;</span> Cat&aacute;logo de logros</span>
+            <h1 id="admin-badges-title">Insignias de DOMUS</h1>
+            <p>Administra la imagen p&uacute;blica de cada logro sin alterar las reglas que lo desbloquean.</p>
+        </div>
+        <aside class="da-badge-overview" aria-label="Resumen de insignias">
+            <span class="da-badge-overview__icon" aria-hidden="true">&#9671;</span>
+            <span>
+                <small>Insignias configuradas</small>
+                <strong>{{ number_format($badges->count()) }}</strong>
+            </span>
+        </aside>
+    </section>
+
     @if(session('status'))
-        <div class="feedback-box feedback-success mt-1">{{ session('status') }}</div>
+        <div class="da-notice da-notice--success" role="status">{{ session('status') }}</div>
     @endif
     @if($errors->any())
-        <div class="feedback-box feedback-error mt-1">{{ $errors->first() }}</div>
+        <div class="da-notice da-notice--error" role="alert">{{ $errors->first() }}</div>
     @endif
 
-    <section class="admin-badge-list">
+    <section class="da-section-heading">
         <div>
-            <h2 class="quick-card-title">Insignias</h2>
-            <p class="quick-card-subtitle">Estas reglas no se editan aqui porque dependen del codigo. El superadmin solo puede cambiar la imagen publica.</p>
+            <span class="da-kicker">Configuraci&oacute;n visual</span>
+            <h2>Im&aacute;genes p&uacute;blicas</h2>
         </div>
+        <span class="da-result-count">{{ $badges->count() }} {{ $badges->count() === 1 ? 'insignia' : 'insignias' }}</span>
+    </section>
+
+    <section class="da-badge-grid" aria-label="Insignias configuradas">
         @foreach($badges as $badge)
             @php
                 $howToEarn = match ($badge->slug) {
@@ -52,33 +67,44 @@
                     default => 'Esta insignia se desbloquea automaticamente cuando se cumple su regla en el sistema.',
                 };
             @endphp
-            <article class="admin-badge-card">
-                <div class="admin-badge-row">
+            <article class="da-badge-card">
+                <div class="da-badge-card__visual">
                     @if($badge->image_path)
-                        <img class="admin-badge-image" src="{{ route('badges.image', ['badge' => $badge->slug]) }}" alt="{{ $badge->title }}">
+                        <img src="{{ route('badges.image', ['badge' => $badge->slug]) }}" alt="{{ $badge->title }}">
                     @else
-                        <div class="admin-badge-image admin-badge-placeholder">Sin imagen</div>
+                        <div class="da-badge-placeholder">
+                            <span aria-hidden="true">&#9671;</span>
+                            <small>Sin imagen</small>
+                        </div>
                     @endif
-                    <div>
-                        <p class="admin-badge-title">{{ $badge->title }}</p>
-                        <p class="admin-badge-meta">{{ $badge->description }}</p>
-                        <p class="admin-badge-meta"><strong>Como se consigue:</strong> {{ $howToEarn }}</p>
-                        <p class="admin-badge-meta"><strong>Puntos:</strong> {{ $badge->points_reward }}</p>
-                        <form method="POST" action="{{ route('admin.badges.image.update', ['badge' => $badge->id]) }}" enctype="multipart/form-data" class="admin-badge-form">
-                            @csrf
-                            <input class="input" type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
-                            <button class="btn gold-btn btn-inline" type="submit">Cambiar imagen</button>
-                        </form>
+                </div>
+
+                <div class="da-badge-card__content">
+                    <div class="da-badge-card__heading">
+                        <span class="da-label">Logro autom&aacute;tico</span>
+                        <span class="da-badge-points">{{ $badge->points_reward }} puntos</span>
                     </div>
+                    <h3>{{ $badge->title }}</h3>
+                    <p class="da-badge-description">{{ $badge->description }}</p>
+
+                    <div class="da-badge-rule">
+                        <span>C&oacute;mo se consigue</span>
+                        <p>{{ $howToEarn }}</p>
+                    </div>
+
+                    <form method="POST" action="{{ route('admin.badges.image.update', ['badge' => $badge->id]) }}" enctype="multipart/form-data" class="da-badge-form">
+                        @csrf
+                        <label class="da-file-field">
+                            <span>Nueva imagen</span>
+                            <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+                            <small>PNG, JPG o WEBP. M&aacute;ximo 1 MB.</small>
+                        </label>
+                        <button class="da-badge-submit" type="submit">Cambiar imagen</button>
+                    </form>
                 </div>
             </article>
         @endforeach
     </section>
-
-    <form method="POST" action="{{ route('admin.logout') }}" class="mt-2">
-        @csrf
-        <button class="btn gold-btn btn-inline" type="submit">Cerrar sesion admin</button>
-    </form>
-</section>
+</main>
 </body>
 </html>
