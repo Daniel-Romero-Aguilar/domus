@@ -167,6 +167,62 @@ class AllowanceController extends Controller
         return response()->json($result);
     }
 
+    public function update(Request $request, Allowance $allowance): JsonResponse
+    {
+        $parent = $request->user();
+        if (! $parent || $parent->role !== 'parent') {
+            return response()->json(['message' => 'Solo los padres pueden modificar mesadas.'], 403);
+        }
+
+        if ($allowance->parent_user_id !== $parent->id) {
+            return response()->json(['message' => 'Esta mesada no pertenece a tu cuenta.'], 403);
+        }
+
+        $validated = $request->validate([
+            'amount' => [
+                'required_without:paused',
+                'required_if:one_time,true',
+                'string',
+                'regex:/^\d+(?:[.,]\d{1,2})?$/',
+            ],
+            'one_time' => ['sometimes', 'boolean'],
+            'paused' => ['sometimes', 'boolean'],
+        ]);
+
+        $hasAmount = array_key_exists('amount', $validated);
+        $oneTimeRequested = (bool) ($validated['one_time'] ?? false);
+
+        if ($hasAmount) {
+            $amountCents = $this->moneyToCents($validated['amount']);
+
+            $allowance->update($oneTimeRequested
+                ? ['next_payment_amount_cents' => $amountCents]
+                : ['amount_cents' => $amountCents, 'next_payment_amount_cents' => null]);
+        }
+
+        if (array_key_exists('paused', $validated)) {
+            $allowance->status = (bool) $validated['paused'] ? 'paused' : 'active';
+            $allowance->save();
+        }
+
+        $allowance = $allowance->fresh()->load(['child:id,name,username', 'parent:id,name']);
+        $oneTime = $allowance->next_payment_amount_cents !== null;
+        $nextPaymentAmountCents = (int) ($allowance->next_payment_amount_cents ?? $allowance->amount_cents);
+        $message = ! $hasAmount && array_key_exists('paused', $validated)
+            ? ((bool) $validated['paused'] ? 'Mesada pausada correctamente.' : 'Mesada reanudada correctamente.')
+            : 'Cantidad de la mesada actualizada correctamente.';
+
+        return response()->json([
+            'message' => $message,
+            'one_time' => $oneTime,
+            'paused' => $allowance->status === 'paused',
+            'next_payment_date' => $allowance->next_run_at?->toISOString(),
+            'next_payment_amount_cents' => $nextPaymentAmountCents,
+            'next_payment_amount_display' => $this->notifications->money($nextPaymentAmountCents),
+            'allowance' => $allowance,
+        ]);
+    }
+
     private function moneyToCents(string|int|float $value): int
     {
         $normalized = str_replace(',', '.', trim((string) $value));

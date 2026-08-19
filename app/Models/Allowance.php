@@ -13,6 +13,7 @@ class Allowance extends Model
         'parent_user_id',
         'child_user_id',
         'amount_cents',
+        'next_payment_amount_cents',
         'frequency',
         'start_at',
         'next_run_at',
@@ -24,6 +25,7 @@ class Allowance extends Model
 
     protected $casts = [
         'amount_cents' => 'integer',
+        'next_payment_amount_cents' => 'integer',
         'start_at' => 'date',
         'next_run_at' => 'datetime',
         'first_payment_immediate' => 'boolean',

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 class SavingsBoxInterestService
 {
     private const MICROCENTS_PER_CENT = 1000000;
+
     private const SECONDS_PER_YEAR = 31536000;
 
     public function runDueForParent(int $parentUserId, ?Carbon $asOf = null): array
@@ -20,6 +21,10 @@ class SavingsBoxInterestService
             ->with('accounts')
             ->where('parent_user_id', $parentUserId)
             ->where('status', 'active')
+            ->where(function ($query): void {
+                $query->where('benefit_mode', 'legacy_accrual')
+                    ->orWhereNull('benefit_mode');
+            })
             ->whereDate('delivery_date', '>=', $asOf->toDateString())
             ->get();
 
@@ -33,6 +38,10 @@ class SavingsBoxInterestService
         $boxes = SavingsBox::query()
             ->with('accounts')
             ->where('status', 'active')
+            ->where(function ($query): void {
+                $query->where('benefit_mode', 'legacy_accrual')
+                    ->orWhereNull('benefit_mode');
+            })
             ->whereDate('delivery_date', '>=', $asOf->toDateString())
             ->get();
 
@@ -49,6 +58,10 @@ class SavingsBoxInterestService
             ->where('user_id', $userId)
             ->whereHas('savingsBox', function ($query) use ($asOf): void {
                 $query->where('status', 'active')
+                    ->where(function ($modeQuery): void {
+                        $modeQuery->where('benefit_mode', 'legacy_accrual')
+                            ->orWhereNull('benefit_mode');
+                    })
                     ->whereDate('delivery_date', '>=', $asOf->toDateString());
             })
             ->get();
@@ -91,6 +104,17 @@ class SavingsBoxInterestService
             return 0;
         }
 
+        if ($box->benefit_mode === 'final_balance_simple') {
+            return 0;
+        }
+
+        $cutoffAt = $box->cutoff_at
+            ? Carbon::parse($box->cutoff_at)
+            : Carbon::parse($box->delivery_date)->endOfDay();
+        if ($moment->gt($cutoffAt)) {
+            $moment = $cutoffAt;
+        }
+
         $lastAccruedAt = $account->interest_accrued_until_at
             ? Carbon::parse($account->interest_accrued_until_at)
             : $moment->copy();
@@ -102,6 +126,7 @@ class SavingsBoxInterestService
                     'last_interest_accrued_on' => $moment->toDateString(),
                 ])->save();
             }
+
             return 0;
         }
 
@@ -144,12 +169,14 @@ class SavingsBoxInterestService
         int $earnedBefore,
         int $earnedAfter,
         Carbon $occurredAt,
-        ?string $note = null
+        ?string $note = null,
+        ?int $cycleNumber = null
     ): void {
         $account->movements()->create([
             'savings_box_id' => $box->id,
             'user_id' => $account->user_id,
             'movement_type' => $type,
+            'cycle_number' => $cycleNumber,
             'amount_cents' => $amountCents,
             'principal_before_cents' => $principalBefore,
             'principal_after_cents' => $principalAfter,

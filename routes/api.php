@@ -53,6 +53,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/family-members', [FamilyMemberController::class, 'store']);
     Route::get('/allowances', [AllowanceController::class, 'index']);
     Route::post('/allowances', [AllowanceController::class, 'store']);
+    Route::patch('/allowances/{allowance}', [AllowanceController::class, 'update']);
     Route::post('/allowances/{allowance}/execute', [AllowanceController::class, 'execute']);
     Route::get('/savings-boxes', [SavingsBoxController::class, 'index']);
     Route::post('/savings-boxes', [SavingsBoxController::class, 'store']);

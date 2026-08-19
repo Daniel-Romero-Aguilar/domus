@@ -1,261 +1,944 @@
-DOMUS API ENDPOINTS
+DOMUS API ENDPOINTS - CONTRATO COMPLETO DE LA API
 
 Flutter usage notes
-- Use this as raw endpoint base.
+- Este archivo es la fuente de verdad de rutas, permisos, body y JSON de respuesta de toda la API.
+- La base de todas las rutas es `/api`.
+- Todos los cuerpos y respuestas son JSON salvo que se indique lo contrario.
+- Los IDs son `integer`; las fechas/horas son `string` ISO-8601 salvo que se indique `YYYY-MM-DD`.
+- Una respuesta de error siempre tiene al menos `{ "message": "string" }`.
+- Una validacion Laravel puede agregar `errors: { "campo": ["string"] }` y responde `422`.
+- Un token inexistente o invalido responde `401`; un rol o recurso sin permiso responde `403`; un recurso no encontrado responde `404`.
+- No convertir un campo ausente en `0`: primero verificar la ruta exacta documentada.
 - Use .agents/flutter_app_docs/00_general_flutter_plan.txt as architecture base.
 - Then pass one screen TXT from .agents/flutter_app_docs per Flutter task.
 - Parent and child/member screens should be separate pages/providers, not one giant role-conditional page.
 - After POST actions, update UI with the returned entity/balance first, then refresh the list if needed.
 - If an action returns unlocked_badges, show a badge earned modal/toast.
+- Cobertura: este archivo refleja las 56 combinaciones metodo/ruta definidas en `routes/api.php`. Las rutas web de Blade/admin no son endpoints de esta API y no se mezclan aqui.
+
+Convencion monetaria
+- Los campos `*_cents` son enteros en centavos de MXN. Ejemplo: `10000` = `$100.00`.
+- Los campos `*_display` son textos ya formateados, por ejemplo `"$100.00"`.
+- Algunos modulos reciben dinero como `string` en el body, por ejemplo `"20.50"`.
+- Prestamos y tareas tienen campos principales en pesos enteros: `loan.amount: 100` y `task.reward_amount: 100` significan `$100.00`; no dividirlos entre 100.
+- En cada endpoint se especifica si un nombre ambiguo como `remaining_balance` representa centavos o pesos.
+
+Tipos compartidos
+```text
+ISODateTime = string|null
+Date = string (YYYY-MM-DD)
+MoneyCents = integer
+MoneyDisplay = string
+
+User = {
+  id: integer,
+  name: string,
+  email: string|null,
+  username: string|null,
+  role: "parent"|"child"|"member",
+  email_verified_at: ISODateTime,
+  current_team_id: integer|null,
+  profile_photo_path: string|null,
+  created_at: ISODateTime,
+  updated_at: ISODateTime,
+  profile_photo_url: string,
+  balance_cents: integer,
+  balance_display: string
+}
+
+UserChild = { id: integer, name: string, username: string|null, profile_photo_url: string, balance_cents: integer, balance_display: string }
+UserParent = { id: integer, name: string, email: string|null, profile_photo_url: string, balance_cents: integer, balance_display: string }
+# Las relaciones UserChild/UserParent pueden omitir columnas base no seleccionadas; conservan identidad y los accessors profile_photo_url, balance_cents y balance_display.
+DomusLevel = { id: integer, level_number: integer, name: string, min_points: integer, max_points: integer, definition: string|null }
+Points = { historical: integer, earned: integer, spent: integer, available: integer }
+DomusPoints = { points: Points, level: DomusLevel|null }
+Badge = { id: integer, slug: string, title: string, description: string|null, text: string|null, image_url: string|null, points_reward: integer }
+DomusReward = { id: integer, parent_user_id: integer, title: string, description: string|null, points_cost: integer, is_active: boolean, created_at: string, updated_at: string }
+```
 
 Auth
 POST /api/register
+Auth: none
 Body: name, email, password, password_confirmation, terms_accepted
-Returns: token, user
+Body types: `name:string`, `email:string`, `password:string` (min 8), `password_confirmation:string`, `terms_accepted:boolean=true`.
+Success `201`:
+```json
+{ "message": "string", "token": "string", "user": { "id": "integer", "name": "string", "email": "string" } }
+```
+The created account has role `parent` and an initial zero balance.
 
 POST /api/login
+Auth: none
 Body: login, password
-Returns: token, user
+Body types: `login:string` (email or username), `password:string`.
+Success `200`:
+```json
+{
+  "message": "string",
+  "token": "string",
+  "user": { "id": "integer", "name": "string", "email": "string|null", "username": "string|null", "role": "parent|child|member" }
+}
+```
+Invalid credentials: `401 { "message": "string" }`.
 
 GET /api/me
 Auth: bearer token
-Returns: user, parent_admin_name, is_family_member
+Success `200`:
+```json
+{ "user": "User", "parent_admin_name": "string|null", "is_family_member": "boolean" }
+```
+For a child/member, `user` includes the loaded balance; the appended `balance_cents` and `balance_display` are always part of the serialized user.
 
 GET /api/user
 Auth: bearer token
-Returns: user
+Success `200`: serialized `User` object directly (not wrapped in `{user:...}`).
 
 POST /api/logout
 Auth: bearer token
-Returns: message
+Success `200`: `{ "message": "string" }`. The current Sanctum token is revoked.
 
 GET /api/notifications
 Auth: bearer token
 Query optional: limit
-Returns: notifications
+`limit` is integer, default `20`, clamped to `1..50`.
+Success `200`:
+```json
+{
+  "notifications": [
+    {
+      "id": "integer",
+      "user_id": "integer",
+      "section": "string",
+      "category": "string",
+      "text": "string",
+      "created_at": "string",
+      "updated_at": "string"
+    }
+  ]
+}
+```
+The list belongs only to the authenticated family user and is newest first.
 
 Domus points
 GET /api/domus-levels
 Auth: bearer token
-Returns: levels
+Auth roles: parent, child, member.
+Success `200`:
+```json
+{ "levels": ["DomusLevel"] }
+```
 
 GET /api/parent/domus-points
 Auth: parent
-Returns: members(user_id, name, role, historical_points, earned_points, spent_points, available_points, level), rewards, redemptions
+Success `200`:
+```json
+{
+  "members": [
+    {
+      "user_id": "integer",
+      "name": "string",
+      "role": "child|member",
+      "historical_points": "integer",
+      "earned_points": "integer",
+      "spent_points": "integer",
+      "available_points": "integer",
+      "level": "DomusLevel|null"
+    }
+  ],
+  "rewards": ["DomusRewardParent"],
+  "redemptions": ["RedemptionSummary"]
+}
+```
+`DomusRewardParent` = `{ id: integer, parent_user_id: integer, title: string, description: string|null, points_cost: integer, is_active: boolean, redemptions_count: integer, created_at: string, updated_at: string }`.
+`RedemptionSummary` = `{ id: integer, reward_title: string|null, child_name: string|null, points_spent: integer, status: string, created_at: string }`.
 
 POST /api/parent/domus-points/rewards
 Auth: parent
 Body: title, description, points_cost
-Returns: message, reward
+Body types: `title:string`, `description:string|null`, `points_cost:integer` min `1`.
+Success `201`: `{ "message": "string", "reward": "DomusReward" }`.
 
 POST /api/parent/domus-points/redemptions/{redemption}/pay
 Auth: parent
-Returns: message, redemption
+Path `redemption`: integer redemption ID.
+Success `200`: `{ "message": "string", "redemption": "RedemptionSummary" }`.
+The redemption must belong to the authenticated parent and not already have status `paid`.
 
 GET /api/child/domus-points
 Auth: child/member
-Returns: points, level, badges(id, slug, title, description, image_url, points_reward, is_completed), rewards, redemptions
+Success `200`:
+```json
+{
+  "points": "Points",
+  "level": "DomusLevel|null",
+  "badges": ["UserBadge"],
+  "rewards": ["DomusRewardChild"],
+  "redemptions": ["RedemptionSummary"]
+}
+```
+`UserBadge` = `{ id: integer, slug: string, title: string, description: string|null, image_url: string|null, points_reward: integer, is_completed: boolean, completed_at: string|null }`.
+`DomusRewardChild` = `{ id: integer, title: string, description: string|null, points_cost: integer, can_redeem: boolean }`.
+If no family-member record exists, all arrays are empty and `points` is zeroed.
 
 POST /api/child/domus-points/rewards/{reward}/redeem
 Auth: child/member
-Returns: message, redemption, domus_points(points, level)
+Path `reward`: integer reward ID.
+Success `201`: `{ "message": "string", "redemption": "DomusRewardRedemption", "domus_points": "DomusPoints" }`.
+`DomusRewardRedemption` = `{ id: integer, domus_reward_id: integer, child_user_id: integer, points_spent: integer, status: string, created_at: string, updated_at: string }`.
+Errors include `403` for a reward outside the child family and `422` for insufficient points.
 
 Goals
 GET /api/child/goals
 Auth: child/member
-Returns: goals, balance_cents, balance_display
+Success `200`:
+```json
+{ "goals": ["Goal"], "balance_cents": "integer", "balance_display": "string" }
+```
+`Goal` = `{ id: integer, name: string, description: string|null, target_amount_cents: integer|null, target_amount_display: string|null, saved_amount_cents: integer, saved_amount_display: string, status: active|completed|canceled, progress_percent: number|null, can_complete: boolean, completed_at: string|null, canceled_at: string|null }`.
 
 POST /api/child/goals
 Auth: child/member
 Body: name, description, target_amount optional
-Returns: goal
+Body types: `name:string`, `description:string|null`, `target_amount:string|null` in normal money format (`20`, `20.5`, `20.50`).
+Success `201`: `{ "message": "string", "goal": "Goal" }`.
 
 POST /api/child/goals/{goal}/deposit
 Auth: child/member
 Body: amount
-Returns: goal, balance_cents, balance_display
+Body: `amount:string` normal money format.
+Success `200`:
+```json
+{
+  "message": "string",
+  "data": { "goal": "Goal", "balance_cents": "integer", "balance_display": "string" },
+  "goal": "Goal",
+  "balance_cents": "integer",
+  "balance_display": "string"
+}
+```
+The operation fails with `422` if the balance is insufficient or the goal is not active.
 
 POST /api/child/goals/{goal}/withdraw
 Auth: child/member
 Body: amount
-Returns: goal, balance_cents, balance_display
+Body: `amount:string` normal money format.
+Success `200`: same shape as deposit, with the updated `goal` and balance.
+The operation fails with `422` if the saved amount is insufficient or the goal is canceled.
 
 POST /api/child/goals/{goal}/complete
 Auth: child/member
-Returns: goal
+Success `200`: `{ "message": "string", "goal": "Goal" }`.
+The goal must be active and, when it has a target, saved amount must reach the target.
 
 POST /api/child/goals/{goal}/cancel
 Auth: child/member
-Returns: goal, balance_cents, balance_display
+Success `200`: same shape as deposit, with status `canceled`; saved money is returned to the balance.
 
 Balance
 POST /api/balance/add
 Auth: bearer token
-Body: amount
-Returns: balance_cents, balance_display, movement, unlocked_badges(id, slug, title, description, image_url, points_reward), domus_points
+Body: `amount:string`, normal money format with up to two decimals.
+Success `200`:
+```json
+{
+  "message": "string",
+  "data": {
+    "balance": "integer (centavos)",
+    "balance_cents": "integer",
+    "balance_display": "string",
+    "movement": {
+      "id": "integer",
+      "amount_added": "integer (centavos)",
+      "amount_added_display": "string",
+      "resulting_balance": "integer (centavos)",
+      "resulting_balance_display": "string",
+      "created_at": "string"
+    },
+    "unlocked_badges": ["Badge"],
+    "domus_points": "DomusPoints|null"
+  },
+  "balance_cents": "integer",
+  "balance_display": "string",
+  "unlocked_badges": ["Badge"],
+  "domus_points": "DomusPoints|null"
+}
+```
 
 Transfers
 GET /api/transfers
 Auth: parent
-Returns: transfers
+Success `200`: `{ "transfers": ["FamilyTransfer"] }` (latest 15).
+`FamilyTransfer` = `{ id: integer, parent_user_id: integer, child_user_id: integer, amount_cents: integer, idempotency_key: string, status: processing|completed|failed, parent_balance_before: integer|null, parent_balance_after: integer|null, child_balance_before: integer|null, child_balance_after: integer|null, failure_reason: string|null, executed_at: string|null, created_at: string, updated_at: string, parent: UserParent, child: UserChild }`.
 
 POST /api/transfers
 Auth: parent
 Header: Idempotency-Key
-Body: child_user_id, amount
-Returns: transfer, remaining_parent_balance, remaining_parent_balance_display, child_balance_cents, child_balance_display
+Body: `child_user_id:integer`, `amount:string` normal money format. Header `Idempotency-Key:string` required, max 120 chars.
+Success new transfer `201`:
+```json
+{
+  "message": "string",
+  "created": true,
+  "transfer": "FamilyTransfer",
+  "remaining_parent_balance": "integer (centavos comprometidos/usados)",
+  "remaining_parent_balance_display": "string",
+  "child_balance_cents": "integer|null",
+  "child_balance_display": "string|null",
+  "executed": true
+}
+```
+Repeating the same idempotency key returns the existing transfer with `created:false` and normally status `200`.
+Validation/family errors return `422`; the transfer is not duplicated.
 
 Cash withdrawals
 GET /api/withdrawals
 Auth: parent or child/member
-Returns: withdrawals, requests, all
+Success `200`:
+```json
+{ "withdrawals": ["CashWithdrawal"], "requests": ["CashWithdrawal"], "all": ["CashWithdrawal"] }
+```
+`CashWithdrawal` = `{ id: integer, amount_cents: integer, amount_display: string, status: pending_parent|pending_child|completed|canceled, status_label: string, parent: UserParent, child: UserChild, initiated_by: UserInitiator, parent_approved_at: string|null, child_approved_at: string|null, completed_at: string|null, canceled_at: string|null, created_at: string|null }`.
+`UserInitiator` contains `id`, `name`, `role`, `profile_photo_url`, `balance_cents`, `balance_display`.
+For a parent, `requests` are `pending_parent` and `withdrawals` are items initiated by that parent. For child/member, the equivalent status is `pending_child`.
 
 POST /api/parent/withdrawals
 Auth: parent
 Body: child_user_id, amount
-Returns: withdrawal, child_balance(balance_cents, balance_display)
+Body: `child_user_id:integer`, `amount:string` normal money format.
+Success `201`: `{ "message": "string", "withdrawal": "CashWithdrawal", "child_balance": { "balance_cents": "integer", "balance_display": "string" } }`.
+The withdrawal is reserved from the child's balance and waits for child acceptance.
 
 POST /api/child/withdrawals
 Auth: child/member
 Body: amount
-Returns: withdrawal, child_balance(balance_cents, balance_display)
+Body: `amount:string` normal money format.
+Success `201`: same shape, with a withdrawal waiting for parent acceptance.
 
 POST /api/withdrawals/{cashWithdrawal}/accept
 Auth: pending side only
-Returns: withdrawal, child_balance(balance_cents, balance_display)
+Path `cashWithdrawal`: integer withdrawal ID.
+Success `200`: `{ "message": "string", "withdrawal": "CashWithdrawal", "child_balance": { "balance_cents": "integer", "balance_display": "string" } }`.
+The correct accepting side is the parent for `pending_parent` or the child/member for `pending_child`.
 
 POST /api/withdrawals/{cashWithdrawal}/cancel
 Auth: parent or child/member in withdrawal
-Returns: withdrawal, child_balance(balance_cents, balance_display)
+Path `cashWithdrawal`: integer withdrawal ID.
+Success `200`: same shape as accept; the held amount is returned to the child's balance and status becomes `canceled`.
 
 Family members
 GET /api/family-members
 Auth: parent
-Returns: members, loan_targets
+Success `200`:
+```json
+{
+  "members": ["FamilyMember"],
+  "loan_targets": [
+    { "family_member_id": "integer", "user_id": "integer", "name": "string", "username": "string|null", "role": "child|member", "is_minor": "boolean-like" }
+  ]
+}
+```
+`FamilyMember` = `{ id: integer, parent_user_id: integer, user_id: integer, is_minor: boolean-like, guardian_declaration_accepted: boolean-like, created_at: string, updated_at: string, user: User }`.
 
 GET /api/family-members-summary
 Auth: parent
-Returns: members
+Success `200`: `{ "members": ["FamilyMemberSummary"] }`.
+`FamilyMemberSummary` = `{ user_id: integer, name: string, username: string|null, role: child|member, balance_cents: integer, balance_display: string, level: DomusLevel|null, level_label: string, debt_principal_cents: integer, debt_principal_display: string, loan_health: { key: current|overdue|due-soon, label: string, next_due_date: string|null }, active_loans_count: integer }`.
 
 GET /api/family-members/{user}/summary
 Auth: parent
-Returns: member, loans
+Path `user`: integer user ID belonging to the parent.
+Success `200`:
+```json
+{
+  "member": {
+    "user_id": "integer",
+    "name": "string",
+    "username": "string|null",
+    "role": "child|member",
+    "is_minor": "boolean-like",
+    "balance_cents": "integer",
+    "balance_display": "string",
+    "points": { "historical": "integer", "spent": "integer", "available": "integer" },
+    "level": "DomusLevel|null",
+    "loan_health": { "key": "string", "label": "string", "next_due_date": "string|null" },
+    "debt_principal_cents": "integer",
+    "debt_principal_display": "string",
+    "active_loans_count": "integer"
+  },
+  "loans": ["FamilyMemberLoan"]
+}
+```
+`FamilyMemberLoan` = `{ id: integer, status: string, amount: integer (pesos MXN), total_amount: integer (pesos MXN), reason: string|null, due_date: string, installments_count: integer, installment_frequency: string, has_interest: boolean, annual_interest_rate: number, payment_summary: PaymentSummary, created_at: string }`.
+Not belonging to the parent returns `404`.
 
 POST /api/family-members
 Auth: parent
 Body: name, username, password, password_confirmation, is_minor, guardian_declaration_accepted
-Returns: member
+Body types: `name:string`, `username:string` (alphanumeric, min 3), `password:string` (min 8), confirmation, `is_minor:boolean`, `guardian_declaration_accepted:boolean`.
+If `is_minor:true`, guardian declaration must be true.
+Success `201`: `{ "message": "string", "member": "FamilyMember" }`.
 
 Allowances
+`AllowanceBase` = `{ id: integer, parent_user_id: integer, child_user_id: integer, amount_cents: integer, next_payment_amount_cents: integer|null, frequency: daily|weekly|monthly|ten_seconds, start_at: string, next_run_at: string|null, first_payment_immediate: boolean, status: pending|active|paused, last_executed_at: string|null, last_failed_at: string|null, created_at: string, updated_at: string, child: UserChild, parent: UserParent }`.
+`amount_cents` is the permanent amount. `next_payment_amount_cents`, when non-null, is the one-time override for the next successful payment and is cleared after that payment. The current API writes only `pending`, `active` and `paused` to `status`.
+`AllowancePayment` = `{ id: integer, allowance_id: integer, scheduled_for: string, status: string, amount_cents: integer, parent_balance_before: integer|null, parent_balance_after: integer|null, child_balance_before: integer|null, child_balance_after: integer|null, executed_at: string|null, failed_at: string|null, failure_reason: string|null, created_at: string, updated_at: string }`.
+
 GET /api/allowances
 Auth: parent
-Returns: allowances, summary
+Success `200`:
+```json
+{
+  "allowances": ["AllowanceListItem"],
+  "summary": {
+    "pending_due_payments": "integer",
+    "pending_due_payments_capped": "boolean",
+    "allowances_with_pending_due_payments": "integer",
+    "paused_due_allowances": "integer"
+  }
+}
+```
+`AllowanceListItem` = `AllowanceBase` plus `{ due_payments_count: integer, due_payments_count_capped: boolean, has_due_payments: boolean, latest_payment: AllowancePayment|null }`.
+The four extra fields above are present only because this endpoint calculates the due-payment preview and loads `latestPayment`. `pending_due_payments` counts due payment periods only for non-paused allowances. `allowances_with_pending_due_payments` counts non-paused allowances with at least one due period. `paused_due_allowances` counts paused allowances with at least one due period, not the number of their due payments.
 
 POST /api/allowances
 Auth: parent
 Body: child_user_id, amount, frequency, first_payment_immediate, start_at
-Returns: allowance, result, balances inside result when executed
+Body types: `child_user_id:integer`, `amount:string` normal money format, `frequency:daily|weekly|monthly|ten_seconds`, `first_payment_immediate:boolean`, `start_at:date` required when immediate is false.
+The selected user must belong to the authenticated parent's family or the endpoint returns `422`. When `first_payment_immediate:true`, a supplied `start_at` is ignored; `start_at` is set to today and `next_run_at` to the current second.
+Success `201`:
+```json
+{ "message": "string", "allowance": "AllowanceBase", "result": "AllowanceExecutionPaid|null" }
+```
+When `first_payment_immediate:true`, the allowance is paid immediately and `result` is an `AllowanceExecutionPaid`. When false, `result:null` and the saved allowance remains `pending` until execution. The returned `allowance` loads `child` and `parent`; it does not include `latest_payment` or the three calculated `due_*` fields.
+
+PATCH /api/allowances/{allowance}
+Auth: parent
+Path `allowance`: integer allowance ID owned by the parent.
+Body: amount, one_time optional, paused optional
+Body types: `amount:string` in normal money format (`20`, `20.5`, `20.50` or with a decimal comma), with up to two decimals; `one_time:boolean` defaults to `false`; `paused:boolean`.
+Success `200`:
+```json
+{
+  "message": "string",
+  "one_time": "boolean",
+  "paused": "boolean",
+  "next_payment_date": "string|null",
+  "next_payment_amount_cents": "integer",
+  "next_payment_amount_display": "string",
+  "allowance": "AllowanceBase"
+}
+```
+`amount` is required for a quantity change, and `one_time:true` also requires `amount`. `one_time:true` applies that amount only to the next successful payment. With `one_time:false` or when omitted, `amount_cents` changes permanently and any pending one-time override is removed. Existing `AllowancePayment` records are never changed. `amount` and `paused` may be sent together.
+To pause or resume without changing the amount, send only `{ "paused": true }` or `{ "paused": false }`. A paused allowance keeps its amount, pending one-time override and `next_run_at`; the scheduler and manual execution do not pay it while paused. Because `next_run_at` is not advanced, overdue periods remain due and are processed after resuming.
+The top-level `one_time` reports whether an override remains saved after the update. The top-level `next_payment_amount_cents` and `next_payment_amount_display` are the effective next amount: they use the override when present and otherwise the permanent amount. The nested `allowance.next_payment_amount_cents` remains the raw nullable override. The returned `allowance` does not include `latest_payment` or the calculated `due_*` fields.
 
 POST /api/allowances/{allowance}/execute
 Auth: parent
-Returns: execution result, remaining_parent_balance_display, child_balance_display
+Path `allowance`: integer allowance ID owned by the parent.
+This endpoint executes with `force:true`: except for a paused allowance, it ignores `start_at` and whether `next_run_at` is still in the future. It pays the period identified by the current `next_run_at` and then advances the schedule.
+
+New successful payment, `200` (`already_executed` and `advanced_schedule` are absent):
+```json
+{
+  "executed": true,
+  "message": "string",
+  "remaining_parent_balance": "integer (centavos comprometidos/usados)",
+  "remaining_parent_balance_display": "string",
+  "child_balance_cents": "integer",
+  "child_balance_display": "string",
+  "allowance": "AllowanceBase",
+  "payment": "AllowancePayment"
+}
+```
+`AllowanceExecutionPaid` is the response shape above. A successful payment uses `next_payment_amount_cents` when present, otherwise `amount_cents`; afterward it clears the one-time override and advances `next_run_at`.
+
+If a paid `AllowancePayment` already exists for the current `allowance_id` and `next_run_at`, the same response fields are returned, `child_balance_cents` and `child_balance_display` may be null, and these two additional keys are present:
+```json
+{ "already_executed": true, "advanced_schedule": true }
+```
+No money is moved again; the allowance schedule is advanced.
+
+Paused allowance, `200` (all payment and balance keys are absent):
+```json
+{ "executed": false, "message": "Esta mesada esta pausada.", "allowance": "AllowanceBase" }
+```
+The returned `allowance` in every execution variant loads `child` and `parent`; it does not include `latest_payment` or the calculated `due_*` fields.
 
 Savings boxes
 GET /api/savings-boxes
 Auth: family user
-Returns: savings_boxes
+Success `200`: `{ "savings_boxes": ["SavingsBox"] }`.
+For parent, each box includes `members: User[]` and `accounts: SavingsBoxAccount[]` for all members.
+For child/member, only active boxes where the user has an account are returned; each box includes `parent: UserParent` and the authenticated user's account(s).
+`SavingsBox` = `{ id: integer, parent_user_id: integer, name: string, duration_months: integer|null, duration_days: integer|null, cycle_days: integer|null, cycle_count: integer|null, plan_version: string|null, max_per_cycle_cents: integer|null, max_amount_cents: integer|null, starts_at: string|null, cutoff_at: string|null, delivery_date: string, benefit_percent: string|null (decimal with 2 places), benefit_mode: final_balance_simple|legacy_accrual|null, annual_gain_percent: string (compatibility field), allow_early_withdrawal: boolean, audience: all|specific, status: active|completed|string, settled_at: string|null, accepts_deposits: boolean, created_at: string, updated_at: string, parent: UserParent|null, members: User[], accounts: SavingsBoxAccount[] }`.
+For new boxes, the plan is frozen when it is created. `duration_months`, `duration_days`, `cycle_days`, `cycle_count`, `plan_version`, `max_per_cycle_cents`, `max_amount_cents`, `starts_at`, `cutoff_at`, `benefit_percent` and `benefit_mode` must be read from the saved box; never recalculate an existing plan from current configuration. `delivery_date` and `annual_gain_percent` remain populated for compatibility, but `cutoff_at` and `benefit_percent` are the authoritative fields for new boxes.
+`max_per_cycle_cents` applies independently to each member account and each fixed-day cycle. `max_amount_cents` is derived as `max_per_cycle_cents * cycle_count` and limits the principal currently held by that member account. The final partial cycle receives the complete per-cycle allowance.
+`SavingsBoxAccount` = `{ id: integer, savings_box_id: integer, user_id: integer, principal_cents: integer, principal_pending_cents: integer, earned_interest_cents: integer, settled_principal_cents: integer, settled_benefit_cents: integer, settled_total_cents: integer, interest_remainder_microcents: integer, last_interest_accrued_on: string|null, interest_accrued_until_at: string|null, settled_at: string|null, current_cycle_number: integer|null, deposited_in_current_cycle_cents: integer|null, remaining_in_current_cycle_cents: integer|null, remaining_total_capacity_cents: integer|null, created_at: string, updated_at: string, user: UserChild|null }`.
+The cycle usage fields are runtime values added by the GET response for new-plan accounts. Settlement fields remain zero/null until the final payout.
 
 POST /api/savings-boxes
 Auth: parent
-Body: name, delivery_date, annual_gain_percent, allow_early_withdrawal, audience, member_user_ids[]
-Returns: savings_box
+Body: name, duration_months, max_per_cycle, benefit_percent, allow_early_withdrawal, audience, member_user_ids[]
+Body types: `name:string`, `duration_months:integer` included in the current `savings_box.months_available` configuration (default `[1,2,3]`), `max_per_cycle:string` normal money format and greater than zero, `benefit_percent:number` 0..1000, `allow_early_withdrawal:boolean`, `audience:all|specific`, `member_user_ids:integer[]` required and non-empty for `specific`.
+Success `201`: `{ "message": "string", "savings_box": "SavingsBox" }`.
+The client does not send a start date, cutoff date, cycle count or total maximum. At creation, the API reads the current configured `days_per_cycle` (default `14`), sets `starts_at`, calculates `cutoff_at` by adding the selected calendar months without overflow, rounds the real duration up to complete cycles, derives `max_amount_cents`, and persists every value as an immutable plan snapshot. Later configuration changes affect only newly created boxes.
 
 POST /api/savings-boxes/{savingsBox}/deposit
 Auth: child/member
 Body: amount
-Returns: account, remaining_balance_cents, remaining_balance_display
+Path `savingsBox`: integer box ID. Body `amount:string` normal money format.
+Success `200`:
+```json
+{
+  "message": "string",
+  "data": { "remaining_balance": "integer (centavos)", "remaining_balance_cents": "integer", "remaining_balance_display": "string", "max_amount_cents": "integer|null", "current_amount_cents": "integer", "remaining_capacity_cents": "integer|null", "remaining_capacity_display": "string|null", "cycle_number": "integer|null", "deposited_in_cycle_cents": "integer|null", "remaining_cycle_cents": "integer|null", "remaining_cycle_display": "string|null", "account": "SavingsBoxAccount" },
+  "remaining_balance": "integer (centavos)",
+  "remaining_balance_cents": "integer",
+  "remaining_balance_display": "string",
+  "max_amount_cents": "integer|null",
+  "current_amount_cents": "integer",
+  "remaining_capacity_cents": "integer|null",
+  "remaining_capacity_display": "string|null",
+  "cycle_number": "integer|null",
+  "deposited_in_cycle_cents": "integer|null",
+  "remaining_cycle_cents": "integer|null",
+  "remaining_cycle_display": "string|null",
+  "account": "SavingsBoxAccount"
+}
+```
+The box must be active, `cutoff_at` must still be in the future, and the member must have an account. Money is moved manually from the member's available balance into `principal_cents`; new-plan boxes do not accrue time-based interest.
+For new boxes, `cycle_number` is calculated from the saved `starts_at` and `cycle_days`. Gross deposits made in the same cycle cannot exceed `max_per_cycle_cents`; withdrawals do not restore already-used cycle allowance. A cycle-limit violation returns `422` with `cycle_number`, `remaining_cycle_cents` and `remaining_cycle_display`. The current principal also cannot exceed the derived `max_amount_cents`; a total-limit violation returns `422` with `max_amount_cents`, `current_amount_cents`, `remaining_capacity_cents` and `remaining_capacity_display`. Limits are independent for each member account.
 
 POST /api/savings-boxes/{savingsBox}/withdraw
 Auth: child/member
 Body: amount
-Returns: account, remaining_balance_cents, remaining_balance_display
+Success `200`: the deposit response shape except `deposited_in_cycle_cents` is not returned; it includes `cycle_number`, `remaining_cycle_cents`, `remaining_cycle_display`, `max_amount_cents`, `current_amount_cents`, `remaining_capacity_cents` and `remaining_capacity_display` after the withdrawal.
+The box must be active, before `cutoff_at`, allow early withdrawal, and the authenticated account's principal must cover the amount. A withdrawal returns principal to the member's available balance and frees total principal capacity, but it does not restore the gross-deposit allowance already used in the current cycle. For new boxes, no benefit is paid on withdrawal; the final benefit is calculated only from the principal that remains at cutoff.
+
+Automatic settlement (no HTTP endpoint)
+At the configured daily time (default `23:59`), the scheduler calls `SavingsBoxSettlementService::runDue()`. The service selects active boxes whose frozen `cutoff_at` has arrived. For every member account it calculates `settled_benefit_cents = round(principal_cents * benefit_percent / 100)`, credits principal plus benefit to the member's available balance, records balance and savings-box movements, fills the settlement fields, clears held principal, and marks the box `completed` with `settled_at`.
+Settlement is transactional and idempotent: calling the service again does not pay a completed box twice. At or after `cutoff_at`, manual deposits and withdrawals are blocked while the box waits for the scheduler. Parent GET responses continue to include completed boxes and their settlement history; child/member GET responses only include active boxes.
 
 Loans
+
+Contrato de importes - obligatorio
+- Los campos monetarios directos del objeto `loan` son pesos mexicanos, no centavos:
+  `amount`, `total_amount`, `installment_amount` y `fixed_interest_amount` son `integer`.
+  Ejemplo: `amount: 100` significa `$100.00 MXN`; no dividir entre 100.
+- El objeto `loan` NO devuelve `amount_cents`, `total_amount_cents` ni `installment_amount_cents` en la raiz.
+- Los campos monetarios de pagos, `payment_summary`, `installment_plan` y saldos que terminan en `_cents` son centavos (`integer`).
+- Los campos que terminan en `_display` son textos listos para mostrar, por ejemplo `"$100.00"`.
+- `remaining_balance` en las respuestas de crear oferta y aprobar es un saldo usado/comprometido en centavos (`integer`), aunque el nombre diga "remaining". Su texto equivalente es `remaining_balance_display`.
+
+Diagnostico del caso que muestra `$0.00`
+- La ruta correcta del importe solicitado es `response.loans[i].amount` en los GET, o `response.loan.amount` en los POST.
+- Para un prestamo de $100, la API debe entregar `loan.amount: 100`, `loan.total_amount: 100` o el total calculado, nunca `0`.
+- No leer `loan.amount_cents`, `loan.total_amount_cents`, `loan.data.amount` ni `loan.payment_summary.amount`: esas rutas no existen para el importe principal y un valor ausente no debe convertirse silenciosamente en cero.
+- La web confirma el contrato actual porque renderiza `loan.amount` y `loan.total_amount` directamente.
+
+Objeto `loan` - forma completa
+```json
+{
+  "id": "integer",
+  "parent_user_id": "integer",
+  "child_user_id": "integer",
+  "amount": "integer (pesos MXN; 100 = $100.00)",
+  "reason": "string|null",
+  "due_date": "string (fecha YYYY-MM-DD o fecha serializada por Laravel)",
+  "installments_count": "integer",
+  "installment_frequency": "weekly|biweekly|monthly",
+  "has_interest": "boolean",
+  "interest_mode": "percent|fixed",
+  "annual_interest_rate": "number",
+  "fixed_interest_amount": "integer (pesos MXN)",
+  "status": "offered|pending|approved|rejected|paid",
+  "rejection_reason": "string|null",
+  "responded_at": "string|null",
+  "requested_by_user_id": "integer|null",
+  "total_amount": "integer (pesos MXN)",
+  "installment_amount": "integer (pesos MXN)",
+  "created_at": "string",
+  "updated_at": "string",
+  "installment_plan": "InstallmentPlan",
+  "payment_summary": "PaymentSummary",
+  "payments": "LoanPayment[] cuando el endpoint carga la relacion; puede no venir en respuestas de creacion/aprobacion",
+  "child": "UserChild|null; se incluye en respuestas para el padre",
+  "parent": "UserParent|null; se incluye en respuestas para el hijo/miembro"
+}
+```
+
+Relaciones anidadas: `child` y `parent` usan los tipos compartidos `UserChild` y `UserParent`. Si una relacion no fue cargada por ese endpoint, la clave puede estar ausente; no debe tratarse como un importe cero.
+
+`InstallmentPlan`
+```json
+{
+  "total_cents": "integer",
+  "total_display": "string",
+  "installments_count": "integer",
+  "groups": [
+    {
+      "count": "integer",
+      "amount_cents": "integer",
+      "amount": "number (pesos MXN)",
+      "amount_display": "string"
+    }
+  ],
+  "summary": "string"
+}
+```
+
+`PaymentSummary`
+```json
+{
+  "total_installments": "integer",
+  "paid_installments": "integer",
+  "pending_installments": "integer",
+  "overdue_installments": "integer",
+  "remaining_installments": "integer",
+  "paid_total_cents": "integer",
+  "paid_principal_cents": "integer",
+  "paid_interest_cents": "integer",
+  "overdue_total_cents": "integer",
+  "overdue_principal_cents": "integer",
+  "overdue_interest_cents": "integer",
+  "remaining_total_cents": "integer",
+  "remaining_principal_cents": "integer",
+  "remaining_interest_cents": "integer",
+  "payable_total_cents": "integer",
+  "payable_principal_cents": "integer",
+  "payable_interest_cents": "integer",
+  "payable_payments": "PaymentSummaryItem[]",
+  "next_payment": "PaymentSummaryItem|null",
+  "next_upcoming_payment": "PaymentSummaryItem|null",
+  "is_fully_paid": "boolean"
+}
+```
+
+`PaymentSummaryItem`
+```json
+{
+  "id": "integer",
+  "installment_number": "integer",
+  "due_date": "string|null",
+  "status": "string",
+  "status_label": "string",
+  "is_payable_today": "boolean",
+  "total_amount_cents": "integer",
+  "principal_amount_cents": "integer",
+  "interest_amount_cents": "integer",
+  "total_amount": "number (pesos MXN)",
+  "principal_amount": "number (pesos MXN)",
+  "interest_amount": "number (pesos MXN)",
+  "total_amount_display": "string",
+  "principal_amount_display": "string",
+  "interest_amount_display": "string",
+  "paid_at": "string|null"
+}
+```
+
+`LoanPayment` cuando viene en `loan.payments` o como `payment` de pago
+```json
+{
+  "id": "integer",
+  "loan_id": "integer",
+  "installment_number": "integer",
+  "due_date": "string",
+  "status": "string",
+  "total_amount_cents": "integer",
+  "principal_amount_cents": "integer",
+  "interest_amount_cents": "integer",
+  "paid_at": "string|null",
+  "created_at": "string",
+  "updated_at": "string",
+  "total_amount": "number (pesos MXN)",
+  "principal_amount": "number (pesos MXN)",
+  "interest_amount": "number (pesos MXN)",
+  "total_amount_display": "string",
+  "principal_amount_display": "string",
+  "interest_amount_display": "string",
+  "status_label": "string",
+  "is_payable_today": "boolean"
+}
+```
+
 GET /api/loans
 Auth: family user
-Returns: loans
+Returns:
+```json
+{
+  "loans": "Loan[]"
+}
+```
+Para padre, cada `loan` incluye `child`; para child/member incluye `parent`.
+Esta respuesta incluye `payments`, `installment_plan` y `payment_summary`.
+
+Relaciones por accion:
+- `GET /api/loans` y `GET /api/loans/waiting`: padre -> `child`; child/member -> `parent`; incluye `payments`.
+- `POST /api/loans`: incluye `child`; la respuesta de creacion no garantiza `payments` como relacion serializada, pero siempre incluye `payment_summary`.
+- `POST /api/loans/{loan}/approve`: incluye `child`; la respuesta no garantiza `payments` como relacion serializada.
+- `POST /api/loans/{loan}/respond`: incluye `parent`, `child` y `payments`.
+- `POST /api/loan-payments/{loanPayment}/pay`: incluye `parent`, `child` y `payments`.
 
 GET /api/loans/waiting
 Auth: family user
-Returns: loans
+Returns: `{ "loans": "Loan[]" }` con la misma forma de `GET /api/loans`.
+Filtra solamente `status: "pending"`.
 
 GET /api/loans/active-total
 Auth: parent
-Returns: total_active_loans, estimated_total_paid_cents, estimated_total_paid_display, interest_generated_this_month_cents, interest_generated_this_month_display, interest_generated_historical_cents, interest_generated_historical_display, currency
+Returns:
+```json
+{
+  "total_active_loans": "integer",
+  "estimated_total_paid": "number (pesos MXN)",
+  "estimated_total_paid_cents": "integer",
+  "estimated_total_paid_display": "string",
+  "interest_generated_this_month": "number (pesos MXN)",
+  "interest_generated_this_month_cents": "integer",
+  "interest_generated_this_month_display": "string",
+  "interest_generated_historical": "number (pesos MXN)",
+  "interest_generated_historical_cents": "integer",
+  "interest_generated_historical_display": "string",
+  "currency": "string (MXN)",
+  "meta": {
+    "is_estimated": "boolean",
+    "estimation_note": "string",
+    "interest_source": "string",
+    "interest_period": { "from": "string", "to": "string" }
+  }
+}
+```
 
 POST /api/loans
 Auth: parent or child/member
 Body: child_user_id, amount, reason, due_date, installments_count, installment_frequency, has_interest, interest_mode, annual_interest_rate, fixed_interest_amount
-Returns: message, loan, remaining_balance and remaining_balance_display when parent creates an offer
+Body types: `child_user_id: integer`, `amount: integer (pesos MXN, min 1)`, `reason: string|null`, `due_date: date`, `installments_count: integer`, `installment_frequency: weekly|biweekly|monthly`, `has_interest: boolean`, `interest_mode: percent|fixed`, `annual_interest_rate: number`, `fixed_interest_amount: integer`.
+Returns for child/member request (`201`):
+```json
+{ "message": "string", "loan": "Loan" }
+```
+The loan status is `pending`.
+Returns for parent offer (`201`):
+```json
+{
+  "message": "string",
+  "loan": "Loan",
+  "remaining_balance": "integer (centavos comprometidos/usados)",
+  "remaining_balance_display": "string"
+}
+```
+The loan status is `offered`.
 
 POST /api/loans/{loan}/approve
 Auth: parent
-Returns: message, loan, remaining_balance, remaining_balance_display, child_balance_cents, child_balance_display
+Returns (`200`):
+```json
+{
+  "message": "string",
+  "loan": "Loan",
+  "remaining_balance": "integer (centavos comprometidos/usados)",
+  "remaining_balance_display": "string",
+  "child_balance_cents": "integer",
+  "child_balance_display": "string"
+}
+```
+The returned loan status is `approved`.
 
 POST /api/loans/{loan}/respond
 Auth: child/member
 Body: action accept/reject, reason required when reject
-Returns: message, loan, member_balance_cents, member_balance_display
+Body types: `action: accept|reject`, `reason: string|null` (required and non-empty for `reject`).
+Returns (`200`):
+```json
+{
+  "message": "string",
+  "loan": "Loan",
+  "member_balance_cents": "integer",
+  "member_balance_display": "string"
+}
+```
+For `accept`, the returned loan status is `approved`; for `reject`, it is `rejected`.
 
 POST /api/loan-payments/{loanPayment}/pay
 Auth: child/member
-Returns: message, payment, loan, member_balance_cents, member_balance_display, new_balance_cents, new_balance_display, parent_balance_cents, parent_balance_display, unlocked_badges(id, slug, title, description, image_url, points_reward), domus_points
+Returns (`200`):
+```json
+{
+  "message": "string",
+  "payment": "LoanPayment",
+  "loan": "Loan",
+  "member_balance_cents": "integer",
+  "member_balance_display": "string",
+  "new_balance_cents": "integer",
+  "new_balance_display": "string",
+  "parent_balance_cents": "integer",
+  "parent_balance_display": "string",
+  "unlocked_badges": [
+    {
+      "id": "integer",
+      "slug": "string",
+      "title": "string",
+      "description": "string|null",
+      "text": "string",
+      "image_url": "string|null",
+      "points_reward": "integer"
+    }
+  ],
+  "domus_points": {
+    "points": {
+      "historical": "integer",
+      "earned": "integer",
+      "spent": "integer",
+      "available": "integer"
+    },
+    "level": "DomusLevel|null"
+  }
+}
+```
+
+`DomusLevel` = `{ "id": "integer", "level_number": "integer", "name": "string", "min_points": "integer", "max_points": "integer", "definition": "string|null" }`.
 
 Education
 GET /api/education/categories
 Auth: bearer token
-Returns: categories
+Success `200`:
+```json
+{
+  "hero": { "title": "string", "text": "string" },
+  "categories": [
+    { "id": "integer", "name": "string", "slug": "string", "description": "string|null", "courses_count": "integer", "max_domus_points": "integer" }
+  ]
+}
+```
+Only active categories and courses are returned.
 
 GET /api/education/categories/{category}/courses
 Auth: bearer token
-Returns: courses
+Path `category`: integer category ID. Inactive/not found category returns `404`.
+Success `200`:
+```json
+{
+  "category": { "id": "integer", "name": "string", "description": "string|null" },
+  "courses": [
+    {
+      "id": "integer",
+      "course_category_id": "integer",
+      "title": "string",
+      "slug": "string",
+      "description": "string|null",
+      "image_url": "string|null",
+      "sort_order": "integer",
+      "lessons_count": "integer",
+      "exam_summary": "ExamSummary|null"
+    }
+  ]
+}
+```
+`ExamSummary` = `{ approved_percentage: integer, excellent_percentage: integer, approved_points: integer, excellent_points: integer, has_approved_reward: boolean, has_excellent_reward: boolean, awarded_points_total: integer, approved_awarded_points: integer, excellent_awarded_points: integer, approved_awarded_at: string|null, excellent_awarded_at: string|null, message: string, last_result: AssessmentResult|null }`.
+`AssessmentResult` = `{ score: integer, total_questions: integer, percentage: number, submitted_at: string }`.
 
 GET /api/education/courses/{course}
 Auth: bearer token
-Returns: course
+Path `course`: integer course ID. Inactive course/category returns `404`.
+Optional query `lesson_id:integer` selects a lesson; otherwise the next incomplete lesson is selected.
+Success `200`:
+```json
+{
+  "category": { "id": "integer", "name": "string", "description": "string|null" },
+  "course": { "id": "integer", "title": "string", "description": "string|null", "image_url": "string|null" },
+  "lessons": ["LessonListItem"],
+  "current_lesson": "LessonDetail|null",
+  "progress": { "completed_lessons": "integer", "total_lessons": "integer" }
+}
+```
+`LessonListItem` = `{ id: integer, name: string, title: string, description: string|null, position: integer, is_completed: boolean }`.
+`LessonDetail` = `{ id: integer, name: string, title: string, description: string|null, position: integer, is_completed: boolean, parts: [LessonPart] }`.
+`LessonPart` = `{ id: integer, type: title|text|video|image|quiz|exam, content: string, meta: object|null, reward: ExamReward|null, last_result: AssessmentResult|null, position: integer }`.
+For quiz/exam parts, `meta` contains `{ uuid:string|null, questions:[{uuid:string|null, question:string, option_a:string, option_b:string, option_c:string, option_d:string}] }` and does not expose the correct option.
+`ExamReward` = `{ approved_percentage: integer, excellent_percentage: integer, approved_points: integer, excellent_points: integer, has_approved_reward: boolean, has_excellent_reward: boolean, awarded_points_total: integer, approved_awarded_points: integer, excellent_awarded_points: integer, approved_awarded_at: string|null, excellent_awarded_at: string|null, message: string }`.
 
 POST /api/education/lessons/{lesson}/complete
 Auth: bearer token
-Returns: message, lesson_completion, progress
+Path `lesson`: integer lesson ID in an active course/category.
+Success `200`:
+```json
+{
+  "message": "string",
+  "lesson_completion": { "lesson_id": "integer", "is_completed": "boolean", "completed_at": "string" },
+  "progress": { "completed_lessons": "integer", "total_lessons": "integer" }
+}
+```
 
 POST /api/education/lesson-parts/{lessonPart}/submit
 Auth: bearer token
-Body: answers[] with question_uuid and answer
-Returns: message, assessment_uuid, assessment_type, score, total_questions, percentage, saved, last_result, reward, achievements, domus_points for exams
+Path `lessonPart`: integer part ID in an active course/category. Only `quiz` and `exam` accept answers.
+Body: `answers:array` with at least one `{ question_uuid:string, answer:a|b|c|d }`.
+Success `200`:
+```json
+{
+  "message": "string",
+  "assessment_uuid": "string",
+  "assessment_type": "quiz|exam",
+  "score": "integer",
+  "total_questions": "integer",
+  "percentage": "number",
+  "saved": "boolean",
+  "last_result": "AssessmentResult|null",
+  "reward": "ExamReward|null",
+  "achievements": [ { "title": "string", "text": "string", "points_reward": "integer" } ],
+  "domus_points": "DomusPoints|null"
+}
+```
+For an exam, at least 50% course progress is required; a failed progress gate returns `400` with `required_progress_percentage` and `current_progress_percentage`. Exam results are saved; quiz results are not saved.
 
 Tasks
 GET /api/parent/tasks
 Auth: parent
-Returns: tasks, available_balance_cents, available_balance_display
+Success `200`:
+```json
+{ "tasks": ["Task"], "available_balance_cents": "integer (centavos comprometidos/usados)", "available_balance_display": "string" }
+```
+`Task` = `{ id: integer, parent_user_id: integer, accepted_by_user_id: integer|null, completed_by_user_id: integer|null, member_completion_requested_at: string|null, name: string, description: string|null, reward_amount: integer (pesos MXN), reward_points: integer, status: open|accepted|in_progress|awaiting_parent_confirmation|completed|closed|ended|canceled, created_at: string, updated_at: string, accepted_by: User|null, completed_by: User|null }`.
 
 POST /api/parent/tasks
 Auth: parent
 Body: name, description, reward_amount, reward_points
-Returns: task, available_balance_cents, available_balance_display
+Body types: `name:string`, `description:string|null`, `reward_amount:integer` pesos MXN min `0`, `reward_points:integer` `0..100`.
+Success `201`: `{ "message": "string", "task": "Task", "available_balance_cents": "integer", "available_balance_display": "string" }`.
 
 POST /api/parent/tasks/{task}/review
 Auth: parent
 Body: action approve/retry/cancel
-Returns: message, task, available_balance_cents, available_balance_display when parent balance changed, available_child_balance_cents, available_child_balance_display when child balance changed, unlocked_badges(id, slug, title, description, image_url, points_reward), domus_points when points changed
+Path `task`: integer task ID owned by the parent. Body `action:approve|retry|cancel`.
+Success `200`:
+```json
+{
+  "message": "string",
+  "task": "Task",
+  "available_balance_cents": "integer|null",
+  "available_balance_display": "string|null",
+  "available_child_balance_cents": "integer|null",
+  "available_child_balance_display": "string|null",
+  "unlocked_badges": ["Badge"],
+  "domus_points": "DomusPoints|null"
+}
+```
+`approve` pays the reward and fills child balance, badge and points. `retry` returns the task to `accepted` and all balance/badge/points fields are null/empty. `cancel` refunds the parent's reserved amount and returns parent balance fields.
 
 GET /api/child/tasks
 Auth: child/member
-Returns: tasks
+Success `200`:
+```json
+{ "tasks": { "open": ["Task"], "accepted": ["Task"], "ended": ["Task"] } }
+```
+`open` contains parent tasks with status `open`; `accepted` contains the authenticated child's accepted/in-progress/awaiting tasks; `ended` contains the child's completed/closed/ended/canceled tasks.
 
 POST /api/child/tasks/{task}/accept
 Auth: child/member
-Returns: task
+Path `task`: integer task ID in the child's parent context.
+Success `200`: `{ "message": "string", "task": "Task" }`; status becomes `accepted`.
 
 POST /api/tasks/member/completed/{task}
 Auth: child/member
-Returns: task, unlocked_badges
+Path `task`: integer task ID accepted by the authenticated child/member.
+Success `200`: `{ "message": "string", "task": "Task", "unlocked_badges": ["Badge"] }`; status becomes `awaiting_parent_confirmation`. No badge is unlocked at this stage.

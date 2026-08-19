@@ -12,6 +12,7 @@ class SavingsBoxMovement extends Model
         'savings_box_id',
         'user_id',
         'movement_type',
+        'cycle_number',
         'amount_cents',
         'principal_before_cents',
         'principal_after_cents',
@@ -23,6 +24,7 @@ class SavingsBoxMovement extends Model
 
     protected $casts = [
         'amount_cents' => 'integer',
+        'cycle_number' => 'integer',
         'principal_before_cents' => 'integer',
         'principal_after_cents' => 'integer',
         'earned_interest_before_cents' => 'integer',

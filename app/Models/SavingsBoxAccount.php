@@ -14,18 +14,26 @@ class SavingsBoxAccount extends Model
         'principal_cents',
         'principal_pending_cents',
         'earned_interest_cents',
+        'settled_principal_cents',
+        'settled_benefit_cents',
+        'settled_total_cents',
         'interest_remainder_microcents',
         'last_interest_accrued_on',
         'interest_accrued_until_at',
+        'settled_at',
     ];
 
     protected $casts = [
         'principal_cents' => 'integer',
         'principal_pending_cents' => 'integer',
         'earned_interest_cents' => 'integer',
+        'settled_principal_cents' => 'integer',
+        'settled_benefit_cents' => 'integer',
+        'settled_total_cents' => 'integer',
         'interest_remainder_microcents' => 'integer',
         'last_interest_accrued_on' => 'date',
         'interest_accrued_until_at' => 'datetime',
+        'settled_at' => 'datetime',
     ];
 
     public function savingsBox(): BelongsTo

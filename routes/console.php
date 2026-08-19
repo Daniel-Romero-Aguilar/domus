@@ -1,11 +1,11 @@
 <?php
 
+use App\Services\AllowanceSchedulerService;
+use App\Services\SavingsBoxSettlementService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
-use App\Services\AllowanceSchedulerService;
-use App\Services\SavingsBoxInterestService;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -26,9 +26,9 @@ Schedule::call(function (): void {
     ->name('domus-allowances-dispatch-test');
 
 Schedule::call(function (): void {
-    $result = app(SavingsBoxInterestService::class)->runDueSavingsBoxes();
+    $result = app(SavingsBoxSettlementService::class)->runDue();
 
-    Log::info('Savings box interest tick', $result);
+    Log::info('Savings box settlement tick', $result);
 })
-    ->daily()
-    ->name('domus-savings-box-interest');
+    ->dailyAt((string) config('savings_box.settlement_time', '23:59'))
+    ->name('domus-savings-box-settlement');

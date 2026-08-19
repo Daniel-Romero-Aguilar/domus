@@ -27,6 +27,14 @@ class AllowanceService
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            if ($allowance->status === 'paused') {
+                return [
+                    'executed' => false,
+                    'message' => 'Esta mesada esta pausada.',
+                    'allowance' => $allowance,
+                ];
+            }
+
             $now = now()->startOfSecond();
             $today = $now->copy()->startOfDay();
             $startAt = Carbon::parse($allowance->start_at)->startOfDay();
@@ -77,7 +85,7 @@ class AllowanceService
                 ];
             }
 
-            $amountCents = (int) $allowance->amount_cents;
+            $amountCents = (int) ($allowance->next_payment_amount_cents ?? $allowance->amount_cents);
 
             $parentBalance = Balance::query()
                 ->where('user_id', $allowance->parent_user_id)
@@ -87,7 +95,7 @@ class AllowanceService
             $payment = $payment ?: new AllowancePayment([
                 'allowance_id' => $allowance->id,
                 'scheduled_for' => $scheduledFor->toDateTimeString(),
-                'amount_cents' => (int) $allowance->amount_cents,
+                'amount_cents' => $amountCents,
             ]);
 
             if (! $parentBalance) {
@@ -140,7 +148,7 @@ class AllowanceService
 
             $payment->fill([
                 'status' => 'paid',
-                'amount_cents' => (int) $allowance->amount_cents,
+                'amount_cents' => $amountCents,
                 'parent_balance_before' => $parentBalanceBefore,
                 'parent_balance_after' => $parentBalanceAfter,
                 'child_balance_before' => $childBalanceBefore,
@@ -155,6 +163,7 @@ class AllowanceService
             $allowance->last_executed_at = $now;
             $allowance->last_failed_at = null;
             $allowance->next_run_at = $this->nextRunDate($allowance->frequency, $scheduledFor);
+            $allowance->next_payment_amount_cents = null;
             $allowance->save();
 
             $amountText = $this->notifications->money($amountCents);
