@@ -32,6 +32,7 @@ class LoanController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $this->markLoanReadDiagnosticStage($request, 'index.resolve_authenticated_user');
         $user = $request->user();
         if (! $user) {
             Log::error('LOANS_INDEX_FAILED: No authenticated user from token.', [
@@ -41,6 +42,10 @@ class LoanController extends Controller
             return response()->json(['message' => 'Unauthenticated context in /loans.'], 401);
         }
 
+        $this->markLoanReadDiagnosticStage($request, 'index.validate_role', [
+            'user_id' => $user->id,
+            'user_role' => $user->role,
+        ]);
         if (! in_array($user->role, ['parent', 'child', 'member'], true)) {
             Log::error('LOANS_INDEX_FAILED: Invalid role.', [
                 'user_id' => $user->id,
@@ -49,6 +54,7 @@ class LoanController extends Controller
             return response()->json(['message' => 'Invalid role for loans listing.'], 422);
         }
 
+        $this->markLoanReadDiagnosticStage($request, 'index.query_loans');
         if ($user->role === 'parent') {
             $loans = Loan::query()
                 ->with(['child:id,name,username'])
@@ -63,20 +69,53 @@ class LoanController extends Controller
                 ->get();
         }
 
-        $this->loanPayments->syncStatusesForLoans($loans);
+        $this->markLoanReadDiagnosticStage($request, 'index.query_loans.completed', [
+            'loan_count' => $loans->count(),
+            'loan_ids_sample' => array_slice($loans->modelKeys(), 0, 50),
+            'loan_id' => null,
+        ]);
+
+        $statusSyncDate = now()->startOfDay();
+        foreach ($loans as $loan) {
+            $this->markLoanReadDiagnosticStage($request, 'index.sync_payment_status', [
+                'loan_id' => $loan->id,
+            ]);
+            $this->loanPayments->syncStatusesForLoan($loan, $statusSyncDate);
+        }
+
+        $this->markLoanReadDiagnosticStage($request, 'index.load_payments', ['loan_id' => null]);
         $loans->load(['payments' => fn ($query) => $query->orderBy('installment_number')]);
 
         foreach ($loans as $loan) {
+            $this->markLoanReadDiagnosticStage($request, 'index.refresh_loan_status', [
+                'loan_id' => $loan->id,
+            ]);
             $this->loanPayments->refreshLoanStatus($loan);
         }
 
+        $presentedLoans = $loans->map(function (Loan $loan) use ($request): Loan {
+            $this->markLoanReadDiagnosticStage($request, 'index.serialize_loan', [
+                'loan_id' => $loan->id,
+                'loan_status' => $loan->status,
+                'loan_requested_months' => $loan->requested_months,
+                'loan_due_date' => $loan->getRawOriginal('due_date'),
+                'loan_proposed_due_date' => $loan->getRawOriginal('proposed_due_date'),
+                'loan_initial_due_date' => $loan->getRawOriginal('initial_due_date'),
+            ]);
+
+            return $this->presentLoan($loan);
+        })->values();
+
+        $this->markLoanReadDiagnosticStage($request, 'index.build_response', ['loan_id' => null]);
+
         return response()->json([
-            'loans' => $loans->map(fn (Loan $loan) => $this->presentLoan($loan))->values(),
+            'loans' => $presentedLoans,
         ]);
     }
 
     public function waiting(Request $request): JsonResponse
     {
+        $this->markLoanReadDiagnosticStage($request, 'waiting.resolve_authenticated_user');
         $user = $request->user();
         if (! $user) {
             Log::error('LOANS_WAITING_FAILED: No authenticated user from token.', [
@@ -86,6 +125,10 @@ class LoanController extends Controller
             return response()->json(['message' => 'Unauthenticated context in /loans/waiting.'], 401);
         }
 
+        $this->markLoanReadDiagnosticStage($request, 'waiting.validate_role', [
+            'user_id' => $user->id,
+            'user_role' => $user->role,
+        ]);
         if (! in_array($user->role, ['parent', 'child', 'member'], true)) {
             Log::error('LOANS_WAITING_FAILED: Invalid role.', [
                 'user_id' => $user->id,
@@ -94,6 +137,7 @@ class LoanController extends Controller
             return response()->json(['message' => 'Invalid role for waiting loans listing.'], 422);
         }
 
+        $this->markLoanReadDiagnosticStage($request, 'waiting.query_loans');
         $loans = Loan::query()
             ->with($user->role === 'parent'
                 ? ['child:id,name,username']
@@ -106,11 +150,40 @@ class LoanController extends Controller
             ->latest()
             ->get();
 
-        $this->loanPayments->syncStatusesForLoans($loans);
+        $this->markLoanReadDiagnosticStage($request, 'waiting.query_loans.completed', [
+            'loan_count' => $loans->count(),
+            'loan_ids_sample' => array_slice($loans->modelKeys(), 0, 50),
+            'loan_id' => null,
+        ]);
+
+        $statusSyncDate = now()->startOfDay();
+        foreach ($loans as $loan) {
+            $this->markLoanReadDiagnosticStage($request, 'waiting.sync_payment_status', [
+                'loan_id' => $loan->id,
+            ]);
+            $this->loanPayments->syncStatusesForLoan($loan, $statusSyncDate);
+        }
+
+        $this->markLoanReadDiagnosticStage($request, 'waiting.load_payments', ['loan_id' => null]);
         $loans->load(['payments' => fn ($query) => $query->orderBy('installment_number')]);
 
+        $presentedLoans = $loans->map(function (Loan $loan) use ($request): Loan {
+            $this->markLoanReadDiagnosticStage($request, 'waiting.serialize_loan', [
+                'loan_id' => $loan->id,
+                'loan_status' => $loan->status,
+                'loan_requested_months' => $loan->requested_months,
+                'loan_due_date' => $loan->getRawOriginal('due_date'),
+                'loan_proposed_due_date' => $loan->getRawOriginal('proposed_due_date'),
+                'loan_initial_due_date' => $loan->getRawOriginal('initial_due_date'),
+            ]);
+
+            return $this->presentLoan($loan);
+        })->values();
+
+        $this->markLoanReadDiagnosticStage($request, 'waiting.build_response', ['loan_id' => null]);
+
         return response()->json([
-            'loans' => $loans->map(fn (Loan $loan) => $this->presentLoan($loan))->values(),
+            'loans' => $presentedLoans,
         ]);
     }
 
@@ -1083,8 +1156,12 @@ class LoanController extends Controller
 
     private function effectiveDueDateForActivation(Loan $loan): string
     {
+        $proposedDueDate = $loan->proposed_due_date ?? $loan->due_date;
+        $initialDueDate = $loan->initial_due_date;
+
         if ($loan->requested_months !== null
-            && $loan->proposed_due_date->toDateString() === $loan->initial_due_date->toDateString()) {
+            && $initialDueDate !== null
+            && $proposedDueDate->toDateString() === $initialDueDate->toDateString()) {
             $activation = now()->startOfDay();
 
             return match ($loan->installment_frequency) {
@@ -1094,7 +1171,7 @@ class LoanController extends Controller
             };
         }
 
-        $dueDate = $loan->proposed_due_date->copy()->startOfDay();
+        $dueDate = $proposedDueDate->copy()->startOfDay();
         $offerStartedAt = $loan->parent_reviewed_at ?? $loan->created_at;
 
         $pendingDays = max(
@@ -1115,6 +1192,32 @@ class LoanController extends Controller
         $loan->setAttribute('payment_summary', $summary);
 
         return $loan;
+    }
+
+    private function markLoanReadDiagnosticStage(Request $request, string $stage, array $context = []): void
+    {
+        if (! $request->attributes->has('loans_read_diagnostic_id')) {
+            return;
+        }
+
+        $request->attributes->set('loans_read_diagnostic_stage', $stage);
+
+        foreach ([
+            'user_id',
+            'user_role',
+            'loan_id',
+            'loan_count',
+            'loan_ids_sample',
+            'loan_status',
+            'loan_requested_months',
+            'loan_due_date',
+            'loan_proposed_due_date',
+            'loan_initial_due_date',
+        ] as $key) {
+            if (array_key_exists($key, $context)) {
+                $request->attributes->set('loans_read_'.$key, $context[$key]);
+            }
+        }
     }
 
     private function reloadAndVerifyLoanAmounts(Loan $loan, array $expectedData): Loan

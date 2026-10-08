@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
@@ -18,6 +19,25 @@ class LogFailedUserActions
             return $next($request);
         }
 
+        $diagnosticId = null;
+        $startedAt = hrtime(true);
+        if ($this->isLoanReadDiagnosticRequest($request)) {
+            $diagnosticId = (string) Str::uuid();
+            $request->attributes->set('loans_read_diagnostic_id', $diagnosticId);
+            $request->attributes->set('loans_read_diagnostic_stage', 'middleware.dispatch');
+
+            Log::info('LOANS_READ_DIAGNOSTIC_STARTED', [
+                'diagnostic_id' => $diagnosticId,
+                'action' => $request->method().' '.$request->path(),
+                'route_name' => $request->route()?->getName(),
+                'user_id' => $request->user()?->id,
+                'user_role' => $request->user()?->role,
+                'app_environment' => app()->environment(),
+                'laravel_version' => app()->version(),
+                'php_version' => PHP_VERSION,
+            ]);
+        }
+
         try {
             $response = $next($request);
         } catch (Throwable $exception) {
@@ -28,8 +48,30 @@ class LogFailedUserActions
             throw $exception;
         }
 
+        if ($diagnosticId !== null) {
+            $response->headers->set('X-Domus-Diagnostic-Id', $diagnosticId);
+        }
+
         if ($response->getStatusCode() >= 400) {
-            $this->writeWarning($request, null, $response);
+            $this->writeWarning($request, $this->responseException($response), $response);
+        }
+
+        if ($diagnosticId !== null) {
+            Log::info('LOANS_READ_DIAGNOSTIC_FINISHED', [
+                'diagnostic_id' => $diagnosticId,
+                'action' => $request->method().' '.$request->path(),
+                'status' => $response->getStatusCode(),
+                'duration_ms' => round((hrtime(true) - $startedAt) / 1_000_000, 2),
+                'diagnostic_stage' => $request->attributes->get('loans_read_diagnostic_stage'),
+                'loan_id' => $request->attributes->get('loans_read_loan_id'),
+                'loan_count' => $request->attributes->get('loans_read_loan_count'),
+                'loan_ids_sample' => $request->attributes->get('loans_read_loan_ids_sample'),
+                'loan_status' => $request->attributes->get('loans_read_loan_status'),
+                'loan_requested_months' => $request->attributes->get('loans_read_loan_requested_months'),
+                'loan_due_date' => $request->attributes->get('loans_read_loan_due_date'),
+                'loan_proposed_due_date' => $request->attributes->get('loans_read_loan_proposed_due_date'),
+                'loan_initial_due_date' => $request->attributes->get('loans_read_loan_initial_due_date'),
+            ]);
         }
 
         return $response;
@@ -38,7 +80,14 @@ class LogFailedUserActions
     private function shouldMonitor(Request $request): bool
     {
         return str_starts_with($request->path(), 'api/')
-            && in_array($request->method(), ['POST', 'PUT', 'PATCH', 'DELETE'], true);
+            && (in_array($request->method(), ['POST', 'PUT', 'PATCH', 'DELETE'], true)
+                || $this->isLoanReadDiagnosticRequest($request));
+    }
+
+    private function isLoanReadDiagnosticRequest(Request $request): bool
+    {
+        return $request->isMethod('GET')
+            && in_array(strtolower($request->path()), ['api/loans', 'api/loans/waiting'], true);
     }
 
     private function writeWarning(Request $request, ?Throwable $exception, ?Response $response): void
@@ -55,10 +104,29 @@ class LogFailedUserActions
             'request_data' => $this->safeInput($request->all()),
         ];
 
+        $diagnosticId = $request->attributes->get('loans_read_diagnostic_id');
+        if ($diagnosticId !== null) {
+            $context['diagnostic_id'] = $diagnosticId;
+            $context['diagnostic_stage'] = $request->attributes->get('loans_read_diagnostic_stage');
+            $context['loan_id'] = $request->attributes->get('loans_read_loan_id');
+            $context['loan_count'] = $request->attributes->get('loans_read_loan_count');
+            $context['loan_ids_sample'] = $request->attributes->get('loans_read_loan_ids_sample');
+            $context['loan_status'] = $request->attributes->get('loans_read_loan_status');
+            $context['loan_requested_months'] = $request->attributes->get('loans_read_loan_requested_months');
+            $context['loan_due_date'] = $request->attributes->get('loans_read_loan_due_date');
+            $context['loan_proposed_due_date'] = $request->attributes->get('loans_read_loan_proposed_due_date');
+            $context['loan_initial_due_date'] = $request->attributes->get('loans_read_loan_initial_due_date');
+        }
+
         if ($response) {
             $context['failure_type'] = 'http_response';
             $context['status'] = $response->getStatusCode();
-            $context['response_data'] = $this->responseData($response);
+            $context['response_content_type'] = $response->headers->get('Content-Type');
+            if ($diagnosticId === null || $response->getStatusCode() < 500) {
+                $context['response_data'] = $this->responseData($response);
+            } else {
+                $context['response_body_omitted'] = true;
+            }
         }
 
         if ($exception) {
@@ -68,6 +136,21 @@ class LogFailedUserActions
             $context['file'] = $exception->getFile();
             $context['line'] = $exception->getLine();
             $context['trace'] = $exception->getTraceAsString();
+            $context['exception_chain'] = $this->exceptionChain($exception);
+
+            if ($exception instanceof \Illuminate\Database\QueryException) {
+                $context['database_query'] = [
+                    'connection' => $exception->getConnectionName(),
+                    'driver' => $exception->getConnectionDetails()['driver'] ?? null,
+                    'database' => $exception->getConnectionDetails()['database'] ?? null,
+                    'sql' => $exception->getSql(),
+                    'binding_count' => count($exception->getBindings()),
+                    'binding_types' => array_map(
+                        static fn (mixed $binding): string => get_debug_type($binding),
+                        $exception->getBindings()
+                    ),
+                ];
+            }
 
             $prefix = 'LOAN_AMOUNT_TRANSFORMATION_FAILED: ';
             if (str_starts_with($exception->getMessage(), $prefix)) {
@@ -82,7 +165,41 @@ class LogFailedUserActions
             }
         }
 
-        Log::warning($context['failure_label'], $context);
+        if ($diagnosticId !== null) {
+            Log::error('LOANS_READ_DIAGNOSTIC_FAILED', $context);
+        } else {
+            Log::warning($context['failure_label'], $context);
+        }
+    }
+
+    private function responseException(Response $response): ?Throwable
+    {
+        return property_exists($response, 'exception') && $response->exception instanceof Throwable
+            ? $response->exception
+            : null;
+    }
+
+    private function exceptionChain(Throwable $exception): array
+    {
+        $chain = [];
+
+        do {
+            $entry = [
+                'class' => $exception::class,
+                'message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+            ];
+
+            if ($exception instanceof \PDOException && isset($exception->errorInfo) && is_array($exception->errorInfo)) {
+                $entry['database_error_info'] = $exception->errorInfo;
+            }
+
+            $chain[] = $entry;
+            $exception = $exception->getPrevious();
+        } while ($exception !== null);
+
+        return $chain;
     }
 
     private function failureLabel(Request $request): string
@@ -90,6 +207,8 @@ class LogFailedUserActions
         $path = strtolower($request->path());
 
         return match (true) {
+            $this->isLoanReadDiagnosticRequest($request) && str_ends_with($path, '/waiting') => 'LECTURA DE PRESTAMOS EN ESPERA FALLIDA',
+            $this->isLoanReadDiagnosticRequest($request) => 'LECTURA DE PRESTAMOS FALLIDA',
             str_contains($path, 'loan-payments') => 'PAGO DE PRESTAMO FALLIDO',
             str_contains($path, '/loans/') && str_contains($path, 'review') => 'REVISION DE PRESTAMO FALLIDA',
             str_contains($path, '/loans/') && str_contains($path, 'reject') => 'RECHAZO DE PRESTAMO FALLIDO',
@@ -118,6 +237,8 @@ class LogFailedUserActions
         $path = strtolower($request->path());
 
         return match (true) {
+            $this->isLoanReadDiagnosticRequest($request) && str_ends_with($path, '/waiting') => 'listar prestamos en espera',
+            $this->isLoanReadDiagnosticRequest($request) => 'listar prestamos',
             str_contains($path, 'loan-payments') => 'registrar el pago de una cuota de prestamo',
             str_contains($path, '/loans/') && str_contains($path, 'review') => 'revisar una solicitud de prestamo',
             str_contains($path, '/loans/') && str_contains($path, 'reject') => 'rechazar una solicitud de prestamo',
@@ -143,6 +264,8 @@ class LogFailedUserActions
         $path = strtolower($request->path());
 
         return match (true) {
+            $this->isLoanReadDiagnosticRequest($request) && str_ends_with($path, '/waiting') => 'listar prestamos en espera',
+            $this->isLoanReadDiagnosticRequest($request) => 'listar prestamos',
             str_contains($path, 'loan-payments') => 'pagar cuota de prestamo',
             str_contains($path, '/loans/') && str_contains($path, 'review') => 'proponer condiciones de prestamo',
             str_contains($path, '/loans/') && str_contains($path, 'reject') => 'rechazar solicitud de prestamo',
