@@ -5,6 +5,7 @@ namespace App\Services\Admin;
 use App\Models\Admin;
 use App\Models\Loan;
 use App\Support\AdminAbilities;
+use App\Support\BalanceHelper;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
@@ -43,7 +44,7 @@ class AdminLoanReadService
             $parentId = (int) $row->parent_user_id;
             $status = (string) $row->status;
             $count = (int) $row->aggregate_count;
-            $amount = (int) $row->aggregate_amount;
+            $amount = BalanceHelper::parseMoneyToCents($row->aggregate_amount);
 
             $result[$parentId]['summary']['total'] += $count;
             $result[$parentId]['summary']['total_amount'] += $amount;
@@ -54,6 +55,12 @@ class AdminLoanReadService
                 $result[$parentId]['summary']['open_amount'] += $amount;
             }
         }
+
+        foreach ($result as &$parentResult) {
+            $parentResult['summary']['total_amount'] /= 100;
+            $parentResult['summary']['open_amount'] /= 100;
+        }
+        unset($parentResult);
 
         $rankedLoans = DB::table('loans')
             ->whereIn('parent_user_id', $parentIds)
@@ -106,7 +113,7 @@ class AdminLoanReadService
         return Loan::query()->whereIn('status', self::OPEN_STATUSES)->count();
     }
 
-    /** @return array{total:int,open:int,total_amount:int,open_amount:int,by_status:array<string,int>} */
+    /** @return array{total:int,open:int,total_amount:int|float,open_amount:int|float,by_status:array<string,int>} */
     private function emptySummary(): array
     {
         return [

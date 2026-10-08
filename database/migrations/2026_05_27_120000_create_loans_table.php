@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('parent_user_id')->constrained('users')->cascadeOnDelete();
             $table->foreignId('child_user_id')->constrained('users')->cascadeOnDelete();
-            $table->unsignedBigInteger('amount');
+            $table->decimal('amount', 14, 2);
             $table->string('reason', 120)->nullable();
             $table->date('due_date');
             $table->unsignedInteger('installments_count')->default(1);
@@ -20,13 +20,36 @@ return new class extends Migration
             $table->boolean('has_interest')->default(false);
             $table->string('interest_mode', 20)->default('percent');
             $table->decimal('annual_interest_rate', 5, 2)->default(0);
-            $table->unsignedBigInteger('fixed_interest_amount')->default(0);
+            $table->decimal('fixed_interest_amount', 14, 2)->default(0);
             $table->string('status', 20)->default('offered');
             $table->string('rejection_reason', 255)->nullable();
             $table->timestamp('responded_at')->nullable();
             $table->foreignId('requested_by_user_id')->nullable()->constrained('users')->nullOnDelete();
-            $table->unsignedBigInteger('total_amount');
-            $table->unsignedBigInteger('installment_amount');
+            $table->decimal('total_amount', 14, 2);
+            $table->decimal('installment_amount', 14, 2);
+
+            // Immutable record of the three choices made by a child.
+            $table->decimal('requested_amount', 14, 2)->nullable();
+            $table->string('requested_reason', 120)->nullable();
+            $table->unsignedSmallInteger('requested_months')->nullable();
+
+            // The server-derived terms as they stood when the child submitted.
+            $table->date('initial_due_date')->nullable();
+            $table->unsignedSmallInteger('initial_installments_count')->nullable();
+            $table->string('initial_installment_frequency', 20)->nullable();
+            $table->boolean('initial_has_interest')->nullable();
+            $table->string('initial_interest_mode', 20)->nullable();
+            $table->decimal('initial_annual_interest_rate', 5, 2)->nullable();
+            $table->decimal('initial_fixed_interest_amount', 14, 2)->nullable();
+            $table->decimal('initial_total_amount', 14, 2)->nullable();
+            $table->decimal('initial_installment_amount', 14, 2)->nullable();
+
+            $table->date('proposed_due_date')->nullable();
+            $table->timestamp('parent_reviewed_at')->nullable();
+            $table->unsignedBigInteger('reserved_amount_cents')->nullable();
+            $table->timestamp('funds_reserved_at')->nullable();
+            $table->timestamp('funds_released_at')->nullable();
+            $table->timestamp('funds_disbursed_at')->nullable();
             $table->timestamps();
         });
     }

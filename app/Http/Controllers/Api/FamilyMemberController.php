@@ -159,8 +159,8 @@ class FamilyMemberController extends Controller
                 return [
                     'id' => (int) $loan->id,
                     'status' => $loan->status,
-                    'amount' => (int) $loan->amount,
-                    'total_amount' => (int) $loan->total_amount,
+                    'amount' => (string) $loan->amount,
+                    'total_amount' => (string) $loan->total_amount,
                     'reason' => $loan->reason,
                     'due_date' => $loan->due_date,
                     'installments_count' => (int) $loan->installments_count,

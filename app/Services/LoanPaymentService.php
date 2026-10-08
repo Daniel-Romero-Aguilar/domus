@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Balance;
 use App\Models\Loan;
 use App\Models\LoanPayment;
+use App\Support\BalanceHelper;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -13,31 +14,44 @@ class LoanPaymentService
 {
     public function ensurePaymentsForLoan(Loan $loan): void
     {
-        if ($loan->payments()->exists()) {
+        if ($loan->status !== 'approved') {
             return;
         }
 
         $count = max(1, (int) $loan->installments_count);
-        $principalParts = $this->distributeCents((int) $loan->amount * 100, $count);
-        $interestTotalCents = max(0, ((int) $loan->total_amount - (int) $loan->amount) * 100);
-        $interestParts = $this->distributeCents($interestTotalCents, $count);
+        $principalParts = $this->distributeCents(
+            BalanceHelper::parseMoneyToCents((string) $loan->amount),
+            $count
+        );
+        $totalParts = $this->distributeCents(
+            BalanceHelper::parseMoneyToCents((string) $loan->total_amount),
+            $count
+        );
         $dueDates = $this->buildDueDates($loan);
         $today = now()->startOfDay();
+        $now = now();
+        $payments = [];
 
         foreach (range(1, $count) as $index) {
             $position = $index - 1;
             $dueDate = $dueDates[$position];
             $status = $loan->status === 'approved' && $dueDate->lt($today) ? 'overdue' : 'pending';
 
-            $loan->payments()->create([
+            $payments[] = [
+                'loan_id' => $loan->id,
                 'installment_number' => $index,
                 'due_date' => $dueDate->toDateString(),
                 'status' => $status,
                 'principal_amount_cents' => $principalParts[$position],
-                'interest_amount_cents' => $interestParts[$position],
-                'total_amount_cents' => $principalParts[$position] + $interestParts[$position],
-            ]);
+                'interest_amount_cents' => $totalParts[$position] - $principalParts[$position],
+                'total_amount_cents' => $totalParts[$position],
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
         }
+
+        // Only duplicate installments are ignored; other database failures must roll back activation.
+        DB::table('loan_payments')->upsert($payments, ['loan_id', 'installment_number'], ['loan_id']);
     }
 
     public function syncStatusesForLoan(Loan $loan, ?Carbon $today = null): void
@@ -70,7 +84,6 @@ class LoanPaymentService
         $today = ($today ?: now())->copy()->startOfDay();
 
         foreach ($loans as $loan) {
-            $this->ensurePaymentsForLoan($loan);
             $this->syncStatusesForLoan($loan, $today);
         }
     }
@@ -146,19 +159,10 @@ class LoanPaymentService
     public function payInstallment(LoanPayment $payment, int $memberUserId): array
     {
         return DB::transaction(function () use ($payment, $memberUserId): array {
-            $payment = LoanPayment::query()
-                ->with('loan')
-                ->lockForUpdate()
-                ->findOrFail($payment->id);
-
             $loan = Loan::query()
-                ->with(['child:id,name,username', 'parent:id,name,email'])
+                ->with(['child:id,name,username', 'parent:id,name,email,role'])
                 ->lockForUpdate()
                 ->findOrFail($payment->loan_id);
-
-            $this->ensurePaymentsForLoan($loan);
-            $this->syncStatusesForLoan($loan);
-            $payment->refresh();
 
             if ($loan->child_user_id !== $memberUserId) {
                 throw new \RuntimeException('PAYMENT_FORBIDDEN');
@@ -168,6 +172,13 @@ class LoanPaymentService
                 throw new \RuntimeException('LOAN_NOT_ACTIVE');
             }
 
+            $payment = LoanPayment::query()
+                ->where('loan_id', $loan->id)
+                ->lockForUpdate()
+                ->findOrFail($payment->id);
+            $this->syncStatusesForLoan($loan);
+            $payment->refresh();
+
             if ($payment->status === 'paid') {
                 throw new \RuntimeException('PAYMENT_ALREADY_PAID');
             }
@@ -176,8 +187,8 @@ class LoanPaymentService
                 throw new \RuntimeException('PAYMENT_NOT_DUE');
             }
 
-            $memberBalance = $this->lockBalance($memberUserId);
             $parentBalance = $this->lockBalance((int) $loan->parent_user_id);
+            $memberBalance = $this->lockBalance($memberUserId);
             $paymentCents = (int) $payment->total_amount_cents;
 
             if ((int) $memberBalance->amount < $paymentCents) {
@@ -239,23 +250,28 @@ class LoanPaymentService
     private function buildDueDates(Loan $loan): array
     {
         $count = max(1, (int) $loan->installments_count);
-        $cursor = Carbon::parse($loan->due_date)->startOfDay();
+        $firstDueDate = Carbon::parse($loan->due_date)->startOfDay();
+        $monthlyFromActivation = $loan->requested_months !== null
+            && ($loan->funds_reserved_at === null
+                || $loan->proposed_due_date?->toDateString() === $loan->initial_due_date->toDateString())
+            && $loan->installment_frequency === 'monthly';
+        $anchor = $monthlyFromActivation ? $loan->funds_disbursed_at->copy()->startOfDay() : $firstDueDate;
         $dates = [];
 
         for ($index = 1; $index <= $count; $index++) {
-            $dates[] = $cursor->copy();
-            $cursor = $this->addFrequency($loan->installment_frequency, $cursor);
+            $periods = $monthlyFromActivation ? $index : $index - 1;
+            $dates[] = $this->addFrequency($loan->installment_frequency, $anchor, $periods);
         }
 
         return $dates;
     }
 
-    private function addFrequency(string $frequency, Carbon $date): Carbon
+    private function addFrequency(string $frequency, Carbon $date, int $periods): Carbon
     {
         return match ($frequency) {
-            'weekly' => $date->copy()->addWeek(),
-            'biweekly' => $date->copy()->addDays(14),
-            default => $date->copy()->addMonthNoOverflow(),
+            'weekly' => $date->copy()->addWeeks($periods),
+            'biweekly' => $date->copy()->addDays(14 * $periods),
+            default => $date->copy()->addMonthsNoOverflow($periods),
         };
     }
 

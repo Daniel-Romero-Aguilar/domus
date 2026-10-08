@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Balance;
-use App\Models\BalanceMovement;
 use App\Models\FamilyMember;
 use App\Models\Loan;
 use App\Models\LoanPayment;
@@ -18,7 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 
 class LoanController extends Controller
 {
@@ -58,7 +57,7 @@ class LoanController extends Controller
                 ->get();
         } else {
             $loans = Loan::query()
-                ->with(['parent:id,name,email'])
+                ->with(['parent:id,name,email,role'])
                 ->where('child_user_id', $user->id)
                 ->latest()
                 ->get();
@@ -98,11 +97,11 @@ class LoanController extends Controller
         $loans = Loan::query()
             ->with($user->role === 'parent'
                 ? ['child:id,name,username']
-                : ['parent:id,name,email'])
+                : ['parent:id,name,email,role'])
             ->when(
                 $user->role === 'parent',
                 fn ($query) => $query->where('parent_user_id', $user->id)->where('status', 'pending'),
-                fn ($query) => $query->where('child_user_id', $user->id)->where('status', 'pending')
+                fn ($query) => $query->where('child_user_id', $user->id)->whereIn('status', ['pending', 'offered'])
             )
             ->latest()
             ->get();
@@ -184,448 +183,559 @@ class LoanController extends Controller
     public function store(Request $request): JsonResponse
     {
         $actor = $request->user();
-
-        $validated = $request->validate([
-            'child_user_id' => ['required', 'integer', 'exists:users,id'],
-            'amount' => ['required', 'integer', 'min:1'],
-            'reason' => ['nullable', 'string', 'max:120'],
-            'due_date' => ['required', 'date'],
-            'installments_count' => ['required', 'integer', 'min:1', 'max:120'],
-            'installment_frequency' => ['required', 'in:weekly,biweekly,monthly'],
-            'has_interest' => ['required', 'boolean'],
-            'interest_mode' => ['nullable', 'in:percent,fixed'],
-            'annual_interest_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'fixed_interest_amount' => ['nullable', 'integer', 'min:0'],
-        ]);
-
-        $parentId = null;
-        $childId = null;
-
-        if ($actor->role === 'parent') {
-            $parentId = $actor->id;
-            $childId = (int) $validated['child_user_id'];
-            $isChildOfParent = FamilyMember::query()
-                ->where('parent_user_id', $parentId)
-                ->where('user_id', $childId)
-                ->exists();
-        } elseif (in_array($actor->role, ['child', 'member'], true)) {
-            $childId = $actor->id;
-            $parentId = FamilyMember::query()
-                ->where('user_id', $actor->id)
-                ->value('parent_user_id');
-
-            if (! $parentId) {
-                return response()->json(['message' => 'Borrower does not belong to a parent account.'], 422);
-            }
-
-            if ((int) $validated['child_user_id'] !== $actor->id) {
-                return response()->json(['message' => 'Borrower can only request a loan for own account.'], 403);
-            }
-
-            $isChildOfParent = true;
-        } else {
-            return response()->json(['message' => 'Invalid role for loan creation.'], 403);
+        if (! $actor || ! in_array($actor->role, ['parent', 'child', 'member'], true)) {
+            return response()->json(['message' => 'Rol sin permiso para crear prestamos.'], 403);
         }
-        if (! $isChildOfParent) {
-            return response()->json(['message' => 'Selected user does not belong to your family members.'], 422);
-        }
-
-        $amount = (int) $validated['amount'];
-        $interestMode = $validated['has_interest'] ? ($validated['interest_mode'] ?? 'percent') : 'percent';
-        $fixedInterestAmount = $validated['has_interest'] && $interestMode === 'fixed'
-            ? (int) ($validated['fixed_interest_amount'] ?? 0)
-            : 0;
-        $rate = $validated['has_interest']
-            ? (float) ($validated['annual_interest_rate'] ?? 0)
-            : 0.0;
-
-        if ($interestMode === 'fixed' && $amount > 0) {
-            $rate = ($fixedInterestAmount / $amount) * 100;
-        }
-
-        $total = (int) round($amount * (1 + ($rate / 100)));
-        $installmentAmount = (int) ceil($total / (int) $validated['installments_count']);
-
-        if (! LoanAmountGuard::isPositive($amount, $total, $installmentAmount)) {
-            return response()->json([
-                'message' => 'No se pudo crear la solicitud de prestamo porque el monto debe ser mayor que cero.',
-                'errors' => [
-                    'amount' => ['El monto del prestamo debe ser un entero mayor que cero.'],
-                ],
-            ], 422);
-        }
-
-        $loanData = [
-            'child_user_id' => $childId,
-            'amount' => $amount,
-            'reason' => $validated['reason'] ?? null,
-            'due_date' => $validated['due_date'],
-            'installments_count' => (int) $validated['installments_count'],
-            'installment_frequency' => $validated['installment_frequency'],
-            'has_interest' => (bool) $validated['has_interest'],
-            'interest_mode' => $interestMode,
-            'annual_interest_rate' => $rate,
-            'fixed_interest_amount' => $fixedInterestAmount,
-            'total_amount' => $total,
-            'installment_amount' => $installmentAmount,
-        ];
 
         if (in_array($actor->role, ['child', 'member'], true)) {
-            $loan = DB::transaction(function () use ($actor, $parentId, $loanData): array {
+            $unexpected = array_diff(array_keys($request->all()), ['amount', 'reason', 'months']);
+            if ($unexpected !== []) {
+                return response()->json([
+                    'message' => 'Una solicitud de hijo solo puede incluir monto, motivo y meses.',
+                    'errors' => ['request' => ['No envies campos de condiciones financieras.']],
+                ], 422);
+            }
+
+            $validated = $request->validate([
+                'amount' => ['required', 'numeric', 'regex:/^\d+(?:\.\d{1,2})?$/', 'gt:0', 'decimal:0,2', 'max:999999999999.99'],
+                'reason' => [
+                    'required',
+                    'string',
+                    'max:120',
+                    function (string $attribute, mixed $value, \Closure $fail): void {
+                        if (! is_string($value) || trim($value) === '' || strip_tags($value) !== $value || preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', $value)) {
+                            $fail('El motivo debe ser texto limpio de hasta 120 caracteres.');
+                        }
+                    },
+                ],
+                'months' => ['required', 'integer', 'in:1,3,6,12'],
+            ], [
+                'months.in' => 'Los meses permitidos son 1, 3, 6 y 12.',
+            ]);
+
+            $parentId = FamilyMember::query()
+                ->where('user_id', $actor->id)
+                ->whereHas('parent', fn ($query) => $query->where('role', 'parent'))
+                ->value('parent_user_id');
+            if (! $parentId) {
+                return response()->json(['message' => 'No existe un padre asociado a esta cuenta.'], 422);
+            }
+
+            $amountCents = $this->moneyInputToCents($validated['amount']);
+            $months = (int) $validated['months'];
+            $dueDate = now()->startOfDay()->addMonthNoOverflow()->toDateString();
+            $terms = $this->buildLoanTerms($amountCents, $months, 'monthly', $dueDate, false, 'percent', 0.0, 0);
+
+            $loan = DB::transaction(function () use ($actor, $parentId, $validated, $months, $terms): array {
+                $reason = trim($validated['reason']);
                 $loan = Loan::create([
                     'parent_user_id' => $parentId,
-                    ...$loanData,
+                    'child_user_id' => $actor->id,
+                    ...$terms,
+                    'reason' => $reason,
                     'status' => 'pending',
                     'requested_by_user_id' => $actor->id,
+                    'requested_amount' => $terms['amount'],
+                    'requested_reason' => $reason,
+                    'requested_months' => $months,
+                    'initial_due_date' => $terms['due_date'],
+                    'initial_installments_count' => $terms['installments_count'],
+                    'initial_installment_frequency' => $terms['installment_frequency'],
+                    'initial_has_interest' => false,
+                    'initial_interest_mode' => 'percent',
+                    'initial_annual_interest_rate' => 0,
+                    'initial_fixed_interest_amount' => 0,
+                    'initial_total_amount' => $terms['total_amount'],
+                    'initial_installment_amount' => $terms['installment_amount'],
                 ]);
 
-                $loan = $this->reloadAndVerifyLoanAmounts($loan, $loanData)
+                $loan = $this->reloadAndVerifyLoanAmounts($loan, $terms)
                     ->load('child:id,name,username');
+                $amountText = $this->notifications->money($terms['amount_cents']);
+                $this->notifications->recordForMember(
+                    $actor->id,
+                    'solicitud',
+                    'prestamos',
+                    'Solicitaste un prestamo por '.$amountText.'.'
+                );
+                $this->notifications->recordForParent(
+                    $parentId,
+                    'solicitud',
+                    'prestamos',
+                    $actor->name.' solicito un prestamo por '.$amountText.'.'
+                );
 
-                $this->loanPayments->ensurePaymentsForLoan($loan);
-
-                $amountText = $this->notifications->money((int) $loan->amount * 100);
-                $this->notifications->recordForMember($actor->id, 'solicitud', 'prestamos', 'Solicitaste un prestamo por '.$amountText.'.');
-                $this->notifications->recordForParent($parentId, 'solicitud', 'prestamos', $actor->name.' solicito un prestamo por '.$amountText.'.');
-
-                // Prepare the complete response before the transaction commits.
-                // If presentation fails, the loan and notifications are rolled back.
                 return $this->presentLoan($loan)->toArray();
             });
 
             return response()->json([
-                'message' => 'Solicitud de prestamo enviada y pendiente de aprobacion.',
+                'message' => 'Solicitud de prestamo enviada y pendiente de revision.',
                 'loan' => $loan,
             ], 201);
         }
 
-        if ($actor->role === 'parent') {
-            try {
-                $payload = DB::transaction(function () use ($actor, $parentId, $loanData) {
-                    $loan = Loan::create([
-                        'parent_user_id' => $parentId,
-                        ...$loanData,
-                        'status' => 'offered',
-                        'requested_by_user_id' => $parentId,
-                    ]);
-                    $loan = $this->reloadAndVerifyLoanAmounts($loan, $loanData);
-                    $this->loanPayments->ensurePaymentsForLoan($loan);
-                    $loanAmountCents = (int) $loan->amount * 100;
+        // Parent-created offers keep the existing endpoint and request shape.
+        $validated = $request->validate([
+            'child_user_id' => ['required', 'integer', 'exists:users,id'],
+            'amount' => ['required', 'numeric', 'regex:/^\d+(?:\.\d{1,2})?$/', 'gt:0', 'decimal:0,2', 'max:999999999999.99'],
+            'reason' => ['nullable', 'string', 'max:120'],
+            'due_date' => ['required', 'date', 'after_or_equal:today'],
+            'installments_count' => ['required', 'integer', 'min:1', 'max:120'],
+            'installment_frequency' => ['required', 'in:weekly,biweekly,monthly'],
+            'has_interest' => ['required', 'boolean'],
+            'interest_mode' => ['required', 'in:percent,fixed'],
+            'annual_interest_rate' => ['required', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            'fixed_interest_amount' => ['required', 'numeric', 'regex:/^\d+(?:\.\d{1,2})?$/', 'min:0', 'decimal:0,2', 'max:999999999999.99'],
+        ]);
 
-                    $balance = Balance::query()
-                        ->where('user_id', $parentId)
-                        ->lockForUpdate()
-                        ->first();
-
-                    if (! $balance) {
-                        $balance = Balance::create([
-                            'user_id' => $parentId,
-                            'amount' => 0,
-                        ]);
-                        $balance = Balance::query()
-                            ->where('user_id', $parentId)
-                            ->lockForUpdate()
-                            ->firstOrFail();
-                    }
-
-                    $parentMoneyUsedBefore = BalanceHelper::parentMoneyUsedCents($actor);
-                    $parentMoneyUsedAfter = $parentMoneyUsedBefore + $loanAmountCents;
-
-                    $balance->movements()->create([
-                        'amount_added' => $loanAmountCents,
-                        'movement_type' => 'loan_reserve',
-                        'note' => 'Loan offered while waiting for child response',
-                        'resulting_balance' => $parentMoneyUsedAfter,
-                    ]);
-
-                    $loan = $loan->fresh(['child:id,name,username']);
-                    $amountText = $this->notifications->money((int) $loan->amount * 100);
-                    $childName = $loan->child?->name ?? 'un integrante';
-
-                    $this->notifications->recordForParent(
-                        $parentId,
-                        'oferta',
-                        'prestamos',
-                        'Ofreciste un prestamo por '.$amountText.' a '.$childName.'.'
-                    );
-                    $this->notifications->recordForMember(
-                        $loan->child_user_id,
-                        'oferta',
-                        'prestamos',
-                        'Recibiste una oferta de prestamo por '.$amountText.'.'
-                    );
-
-                    // The response payload is built before the transaction commits.
-                    return [
-                        'loan' => $this->presentLoan($loan)->toArray(),
-                        'remaining_balance' => $parentMoneyUsedAfter,
-                    ];
-                });
-            } catch (\Throwable $exception) {
-                if ($exception->getMessage() === 'INSUFFICIENT_BALANCE') {
-                    return response()->json(['message' => 'No se pudo crear este prestamo.'], 422);
-                }
-
-                throw $exception;
-            }
-
-            return response()->json([
-                'message' => 'Oferta de prestamo creada correctamente.',
-                'loan' => $payload['loan'],
-                'remaining_balance' => $payload['remaining_balance'],
-                'remaining_balance_display' => BalanceHelper::displayCents((int) $payload['remaining_balance']),
-            ], 201);
+        $childId = (int) $validated['child_user_id'];
+        if (! FamilyMember::query()
+            ->where('parent_user_id', $actor->id)
+            ->where('user_id', $childId)
+            ->whereHas('user', fn ($query) => $query->whereIn('role', ['child', 'member']))
+            ->exists()) {
+            return response()->json(['message' => 'El usuario seleccionado no pertenece a tu familia.'], 422);
         }
 
-        return response()->json(['message' => 'Invalid role for loan creation.'], 403);
+        try {
+            $terms = $this->buildLoanTermsFromParentInput($validated);
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'errors' => ['interest_mode' => [$exception->getMessage()]],
+            ], 422);
+        }
+
+        $loanData = [
+            ...$terms,
+            'child_user_id' => $childId,
+            'reason' => isset($validated['reason']) ? trim($validated['reason']) : null,
+        ];
+
+        $payload = DB::transaction(function () use ($actor, $loanData): array {
+            $balance = $this->lockOrCreateBalance((int) $actor->id);
+            $loan = Loan::create([
+                'parent_user_id' => $actor->id,
+                ...$loanData,
+                'status' => 'offered',
+                'requested_by_user_id' => $actor->id,
+                'proposed_due_date' => $loanData['due_date'],
+                'reserved_amount_cents' => $loanData['amount_cents'],
+                'funds_reserved_at' => now(),
+            ]);
+            $loan = $this->reloadAndVerifyLoanAmounts($loan, $loanData);
+            $parentMoneyUsedAfter = BalanceHelper::parentMoneyUsedCents($actor) + $loanData['amount_cents'];
+            $balance->movements()->create([
+                'amount_added' => $loanData['amount_cents'],
+                'movement_type' => 'loan_reserve',
+                'note' => 'Loan offered while waiting for child response',
+                'resulting_balance' => $parentMoneyUsedAfter,
+            ]);
+
+            $loan = $loan->fresh(['child:id,name,username']);
+            $amountText = $this->notifications->money($loanData['amount_cents']);
+            $childName = $loan->child?->name ?? 'un integrante';
+            $this->notifications->recordForParent(
+                $actor->id,
+                'oferta',
+                'prestamos',
+                'Ofreciste un prestamo por '.$amountText.' a '.$childName.'.'
+            );
+            $this->notifications->recordForMember(
+                $loan->child_user_id,
+                'oferta',
+                'prestamos',
+                'Recibiste una oferta de prestamo por '.$amountText.'.'
+            );
+
+            return [
+                'loan' => $this->presentLoan($loan)->toArray(),
+                'remaining_balance' => $parentMoneyUsedAfter,
+            ];
+        });
+
+        return response()->json([
+            'message' => 'Oferta de prestamo creada correctamente.',
+            'loan' => $payload['loan'],
+            'remaining_balance' => $payload['remaining_balance'],
+            'remaining_balance_display' => BalanceHelper::displayCents((int) $payload['remaining_balance']),
+        ], 201);
     }
 
     public function approve(Request $request, Loan $loan): JsonResponse
     {
         $parent = $request->user();
-        if ($parent->role !== 'parent') {
-            return response()->json(['message' => 'Only parent can approve loans.'], 403);
+        if (! $parent || $parent->role !== 'parent') {
+            return response()->json(['message' => 'Solo el padre puede aprobar solicitudes.'], 403);
         }
         if ($loan->parent_user_id !== $parent->id) {
-            return response()->json(['message' => 'Loan does not belong to your account.'], 403);
+            return response()->json(['message' => 'Esta solicitud no pertenece a tu familia.'], 403);
         }
-        if ($loan->status !== 'pending') {
-            return response()->json(['message' => 'Loan is not pending.'], 422);
+        if ($request->all() !== []) {
+            return response()->json(['message' => 'La aprobacion directa no recibe condiciones; usa la revision para proponer cambios.'], 422);
         }
 
         try {
-            $payload = DB::transaction(function () use ($parent, $loan) {
-                $balance = Balance::query()
-                    ->where('user_id', $parent->id)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (! $balance) {
-                    $balance = Balance::create([
-                        'user_id' => $parent->id,
-                        'amount' => 0,
-                    ]);
-                    $balance = Balance::query()
-                        ->where('user_id', $parent->id)
-                        ->lockForUpdate()
-                        ->firstOrFail();
+            $result = DB::transaction(function () use ($parent, $loan): array {
+                $lockedLoan = Loan::query()->whereKey($loan->id)->lockForUpdate()->firstOrFail();
+                if ((int) $lockedLoan->parent_user_id !== (int) $parent->id) {
+                    throw new \RuntimeException('LOAN_FORBIDDEN');
                 }
 
-                $loanAmountCents = (int) $loan->amount * 100;
+                if (in_array($lockedLoan->status, ['approved', 'paid'], true) && $lockedLoan->funds_disbursed_at) {
+                    return $this->approvedLoanResponseData($lockedLoan);
+                }
+                if ($lockedLoan->status !== 'pending') {
+                    throw new \RuntimeException('LOAN_NOT_PENDING');
+                }
 
-                $parentMoneyUsedBefore = BalanceHelper::parentMoneyUsedCents($parent);
-                $parentMoneyUsedAfter = $parentMoneyUsedBefore + $loanAmountCents;
+                return $this->disbursePendingLoan($parent, $lockedLoan);
+            });
+        } catch (\RuntimeException $exception) {
+            return match ($exception->getMessage()) {
+                'LOAN_FORBIDDEN' => response()->json(['message' => 'Esta solicitud no pertenece a tu familia.'], 403),
+                'LOAN_NOT_PENDING' => response()->json(['message' => 'La solicitud ya no esta pendiente.'], 422),
+                default => throw $exception,
+            };
+        }
 
+        return $this->loanActionResponse($result, 'Solicitud aprobada y prestamo depositado.');
+    }
+
+    public function review(Request $request, Loan $loan): JsonResponse
+    {
+        $parent = $request->user();
+        if (! $parent || $parent->role !== 'parent') {
+            return response()->json(['message' => 'Solo el padre puede revisar solicitudes.'], 403);
+        }
+        if ($loan->parent_user_id !== $parent->id) {
+            return response()->json(['message' => 'Esta solicitud no pertenece a tu familia.'], 403);
+        }
+
+        $unexpected = array_diff(array_keys($request->all()), [
+            'amount',
+            'due_date',
+            'installments_count',
+            'installment_frequency',
+            'has_interest',
+            'interest_mode',
+            'annual_interest_rate',
+            'fixed_interest_amount',
+        ]);
+        if ($unexpected !== []) {
+            return response()->json(['message' => 'La revision contiene campos no permitidos.'], 422);
+        }
+
+        $validated = $request->validate([
+            'amount' => ['required', 'numeric', 'regex:/^\d+(?:\.\d{1,2})?$/', 'gt:0', 'decimal:0,2', 'max:999999999999.99'],
+            'due_date' => ['required', 'date', 'after_or_equal:today'],
+            'installments_count' => ['required', 'integer', 'min:1', 'max:120'],
+            'installment_frequency' => ['required', 'in:weekly,biweekly,monthly'],
+            'has_interest' => ['required', 'boolean'],
+            'interest_mode' => ['required', 'in:percent,fixed'],
+            'annual_interest_rate' => ['required', 'numeric', 'min:0', 'max:100', 'decimal:0,2'],
+            'fixed_interest_amount' => ['required', 'numeric', 'regex:/^\d+(?:\.\d{1,2})?$/', 'min:0', 'decimal:0,2', 'max:999999999999.99'],
+        ]);
+
+        try {
+            $terms = $this->buildLoanTermsFromParentInput($validated);
+        } catch (\InvalidArgumentException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'errors' => ['interest_mode' => [$exception->getMessage()]],
+            ], 422);
+        }
+
+        try {
+            $result = DB::transaction(function () use ($parent, $loan, $terms): array {
+                $lockedLoan = Loan::query()->whereKey($loan->id)->lockForUpdate()->firstOrFail();
+                if ((int) $lockedLoan->parent_user_id !== (int) $parent->id) {
+                    throw new \RuntimeException('LOAN_FORBIDDEN');
+                }
+
+                if ($lockedLoan->status === 'offered' && $this->loanHasSameTerms($lockedLoan, $terms)) {
+                    return $this->proposalResponseData($lockedLoan);
+                }
+                if (in_array($lockedLoan->status, ['approved', 'paid'], true)
+                    && $lockedLoan->funds_disbursed_at
+                    && $this->loanHasSameTerms($lockedLoan, $terms)) {
+                    return $this->approvedLoanResponseData($lockedLoan);
+                }
+                if ($lockedLoan->status !== 'pending') {
+                    throw new \RuntimeException('LOAN_NOT_PENDING');
+                }
+                if ($this->loanHasSameTerms($lockedLoan, $terms)) {
+                    return $this->disbursePendingLoan($parent, $lockedLoan);
+                }
+
+                $balance = $this->lockOrCreateBalance((int) $parent->id);
+                $reservedCents = $terms['amount_cents'];
+                $lockedLoan->fill($this->persistedLoanTerms($terms));
+                $lockedLoan->proposed_due_date = $terms['due_date'];
+                $lockedLoan->status = 'offered';
+                $lockedLoan->parent_reviewed_at = now();
+                $lockedLoan->reserved_amount_cents = $reservedCents;
+                $lockedLoan->funds_reserved_at = now();
+                $lockedLoan->funds_released_at = null;
+                $lockedLoan->funds_disbursed_at = null;
+                $lockedLoan->responded_at = null;
+                $lockedLoan->rejection_reason = null;
+                $lockedLoan->save();
+
+                $parentMoneyUsedAfter = BalanceHelper::parentMoneyUsedCents($parent) + $reservedCents;
                 $balance->movements()->create([
-                    'amount_added' => $loanAmountCents,
-                    'movement_type' => 'loan_debit',
-                    'note' => 'Loan approval',
+                    'amount_added' => $reservedCents,
+                    'movement_type' => 'loan_reserve',
+                    'note' => 'Loan terms proposed for child request',
                     'resulting_balance' => $parentMoneyUsedAfter,
                 ]);
 
-                $childBalance = Balance::query()
-                    ->where('user_id', $loan->child_user_id)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (! $childBalance) {
-                    $childBalance = Balance::create([
-                        'user_id' => $loan->child_user_id,
-                        'amount' => 0,
-                    ]);
-                    $childBalance = Balance::query()
-                        ->where('user_id', $loan->child_user_id)
-                        ->lockForUpdate()
-                        ->firstOrFail();
-                }
-
-                $childBalance->amount = (int) $childBalance->amount + $loanAmountCents;
-                $childBalance->save();
-
-                $childBalance->movements()->create([
-                    'amount_added' => $loanAmountCents,
-                    'movement_type' => 'loan_credit',
-                    'note' => 'Loan approved by parent',
-                    'resulting_balance' => $childBalance->amount,
-                ]);
-
-                $loan->status = 'approved';
-                $loan->rejection_reason = null;
-                $loan->responded_at = now();
-                $loan->save();
-                $this->loanPayments->ensurePaymentsForLoan($loan);
-                $this->loanPayments->syncStatusesForLoan($loan);
-
-                $loan = $loan->fresh(['child:id,name,username']);
-                $amountText = $this->notifications->money((int) $loan->amount * 100);
-                $childName = $loan->child?->name ?? 'un integrante';
-
+                $lockedLoan->load(['parent:id,name,email,role', 'child:id,name,username']);
+                $amountText = $this->notifications->money($reservedCents);
                 $this->notifications->recordForParent(
                     $parent->id,
-                    'aprobacion',
+                    'oferta',
                     'prestamos',
-                    'Aprobaste un prestamo por '.$amountText.' para '.$childName.'.'
+                    'Propusiste condiciones para un prestamo por '.$amountText.' a '.($lockedLoan->child?->name ?? 'un integrante').'.'
                 );
                 $this->notifications->recordForMember(
-                    $loan->child_user_id,
-                    'aprobacion',
+                    $lockedLoan->child_user_id,
+                    'oferta',
                     'prestamos',
-                    'Tu prestamo por '.$amountText.' fue aprobado.'
+                    'Tu padre propuso condiciones para tu solicitud de prestamo.'
                 );
 
-                return [
-                    'loan' => $loan,
-                    'remaining_balance' => $parentMoneyUsedAfter,
-                    'child_balance_cents' => (int) $childBalance->amount,
-                ];
+                return $this->proposalResponseData($lockedLoan, $parentMoneyUsedAfter);
             });
         } catch (\RuntimeException $exception) {
-            if ($exception->getMessage() === 'INSUFFICIENT_BALANCE') {
-                return response()->json(['message' => 'No se pudo aprobar este prestamo.'], 422);
-            }
+            return match ($exception->getMessage()) {
+                'LOAN_FORBIDDEN' => response()->json(['message' => 'Esta solicitud no pertenece a tu familia.'], 403),
+                'LOAN_NOT_PENDING' => response()->json(['message' => 'La solicitud ya no esta pendiente.'], 422),
+                default => throw $exception,
+            };
+        }
 
-            throw $exception;
+        if (in_array($result['loan']['status'] ?? null, ['approved', 'paid'], true)) {
+            return $this->loanActionResponse($result, 'Solicitud aprobada y prestamo depositado.');
         }
 
         return response()->json([
-            'message' => 'Loan approved.',
-            'loan' => $this->presentLoan($payload['loan']),
-            'remaining_balance' => $payload['remaining_balance'],
-            'remaining_balance_display' => BalanceHelper::displayCents((int) $payload['remaining_balance']),
-            'child_balance_cents' => $payload['child_balance_cents'],
-            'child_balance_display' => BalanceHelper::displayCents((int) $payload['child_balance_cents']),
+            'message' => 'Propuesta enviada al hijo para su confirmacion.',
+            'loan' => $result['loan'],
+            'remaining_balance' => $result['remaining_balance'],
+            'remaining_balance_display' => BalanceHelper::displayCents((int) $result['remaining_balance']),
+        ]);
+    }
+
+    public function reject(Request $request, Loan $loan): JsonResponse
+    {
+        $parent = $request->user();
+        if (! $parent || $parent->role !== 'parent') {
+            return response()->json(['message' => 'Solo el padre puede rechazar solicitudes.'], 403);
+        }
+        if ($loan->parent_user_id !== $parent->id) {
+            return response()->json(['message' => 'Esta solicitud no pertenece a tu familia.'], 403);
+        }
+
+        $validated = $request->validate([
+            'reason' => ['nullable', 'string', 'max:255'],
+        ]);
+        if (array_diff(array_keys($request->all()), ['reason']) !== []) {
+            return response()->json(['message' => 'El rechazo solo acepta un motivo opcional.'], 422);
+        }
+
+        try {
+            $result = DB::transaction(function () use ($parent, $loan, $validated): array {
+                $lockedLoan = Loan::query()->whereKey($loan->id)->lockForUpdate()->firstOrFail();
+                if ((int) $lockedLoan->parent_user_id !== (int) $parent->id) {
+                    throw new \RuntimeException('LOAN_FORBIDDEN');
+                }
+                if ($lockedLoan->status === 'rejected' && ! $lockedLoan->funds_reserved_at) {
+                    return $this->approvedLoanResponseData($lockedLoan);
+                }
+                if ($lockedLoan->status !== 'pending') {
+                    throw new \RuntimeException('LOAN_NOT_PENDING');
+                }
+
+                $lockedLoan->status = 'rejected';
+                $lockedLoan->rejection_reason = isset($validated['reason']) ? trim($validated['reason']) : null;
+                $lockedLoan->parent_reviewed_at = now();
+                $lockedLoan->responded_at = now();
+                $lockedLoan->save();
+
+                $lockedLoan->load(['parent:id,name,email,role', 'child:id,name,username']);
+                $this->notifications->recordForParent(
+                    $parent->id,
+                    'rechazo',
+                    'prestamos',
+                    'Rechazaste la solicitud de prestamo de '.($lockedLoan->child?->name ?? 'un integrante').'.'
+                );
+                $this->notifications->recordForMember(
+                    $lockedLoan->child_user_id,
+                    'rechazo',
+                    'prestamos',
+                    'Tu solicitud de prestamo fue rechazada por tu padre.'
+                );
+
+                return $this->approvedLoanResponseData($lockedLoan);
+            });
+        } catch (\RuntimeException $exception) {
+            return match ($exception->getMessage()) {
+                'LOAN_FORBIDDEN' => response()->json(['message' => 'Esta solicitud no pertenece a tu familia.'], 403),
+                'LOAN_NOT_PENDING' => response()->json(['message' => 'La solicitud ya no esta pendiente.'], 422),
+                default => throw $exception,
+            };
+        }
+
+        return response()->json([
+            'message' => 'Solicitud rechazada.',
+            'loan' => $result['loan'],
         ]);
     }
 
     public function respondToOffer(Request $request, Loan $loan): JsonResponse
     {
         $child = $request->user();
-        if (! in_array($child->role, ['child', 'member'], true)) {
-            return response()->json(['message' => 'Only child/member can respond to an offer.'], 403);
+        if (! $child || ! in_array($child->role, ['child', 'member'], true)) {
+            return response()->json(['message' => 'Solo el hijo puede responder a una oferta.'], 403);
         }
         if ($loan->child_user_id !== $child->id) {
-            return response()->json(['message' => 'Loan does not belong to your account.'], 403);
-        }
-        if ($loan->status !== 'offered') {
-            return response()->json(['message' => 'Loan is not in offered status.'], 422);
+            return response()->json(['message' => 'Esta oferta no pertenece a tu cuenta.'], 403);
         }
 
         $validated = $request->validate([
             'action' => ['required', 'in:accept,reject'],
             'reason' => ['nullable', 'string', 'max:255'],
         ]);
-
+        if (array_diff(array_keys($request->all()), ['action', 'reason']) !== []) {
+            return response()->json(['message' => 'La respuesta solo acepta action y un motivo de rechazo opcional.'], 422);
+        }
         if ($validated['action'] === 'reject' && empty(trim((string) ($validated['reason'] ?? '')))) {
-            return response()->json(['message' => 'Rejection reason is required.'], 422);
+            return response()->json(['message' => 'Indica el motivo del rechazo.'], 422);
         }
 
-        $result = DB::transaction(function () use ($child, $loan, $validated) {
-            $parentBalance = Balance::query()
-                ->where('user_id', $loan->parent_user_id)
-                ->lockForUpdate()
-                ->first();
-
-            $childBalance = Balance::query()
-                ->where('user_id', $child->id)
-                ->lockForUpdate()
-                ->first();
-
-            if (! $childBalance) {
-                $childBalance = Balance::create([
-                    'user_id' => $child->id,
-                    'amount' => 0,
-                ]);
-                $childBalance = Balance::query()
-                    ->where('user_id', $child->id)
-                    ->lockForUpdate()
-                    ->firstOrFail();
-            }
-
-            if ($validated['action'] === 'accept') {
-                if (! $parentBalance) {
-                    throw new \RuntimeException('PARENT_BALANCE_NOT_RESERVED');
+        try {
+            $result = DB::transaction(function () use ($child, $loan, $validated): array {
+                $lockedLoan = Loan::query()->whereKey($loan->id)->lockForUpdate()->firstOrFail();
+                if ((int) $lockedLoan->child_user_id !== (int) $child->id) {
+                    throw new \RuntimeException('LOAN_FORBIDDEN');
                 }
 
-                $loanAmountCents = (int) $loan->amount * 100;
+                if ($validated['action'] === 'accept'
+                    && in_array($lockedLoan->status, ['approved', 'paid'], true)
+                    && $lockedLoan->funds_disbursed_at) {
+                    return $this->approvedLoanResponseData($lockedLoan);
+                }
+                if ($validated['action'] === 'reject'
+                    && $lockedLoan->status === 'rejected'
+                    && $lockedLoan->funds_released_at) {
+                    return $this->approvedLoanResponseData($lockedLoan);
+                }
+                if ($lockedLoan->status !== 'offered') {
+                    throw new \RuntimeException('LOAN_NOT_OFFERED');
+                }
 
-                $childBalance->amount = (int) $childBalance->amount + $loanAmountCents;
-                $childBalance->save();
+                if (! $lockedLoan->funds_reserved_at || ! $lockedLoan->reserved_amount_cents) {
+                    throw new \RuntimeException('RESERVATION_NOT_FOUND');
+                }
+                $parentBalance = $this->lockOrCreateBalance((int) $lockedLoan->parent_user_id);
+                $childBalance = $this->lockOrCreateBalance((int) $child->id);
+                $reservedCents = (int) $lockedLoan->reserved_amount_cents;
 
-                $childBalance->movements()->create([
-                    'amount_added' => $loanAmountCents,
-                    'movement_type' => 'loan_credit',
-                    'note' => 'Loan accepted by child',
-                    'resulting_balance' => $childBalance->amount,
-                ]);
+                if ($validated['action'] === 'accept') {
+                    $loanAmountCents = BalanceHelper::parseMoneyToCents((string) $lockedLoan->amount);
+                    if ($loanAmountCents !== $reservedCents) {
+                        throw new \RuntimeException('RESERVATION_AMOUNT_MISMATCH');
+                    }
 
-                $loan->status = 'approved';
-                $loan->rejection_reason = null;
-                $this->loanPayments->ensurePaymentsForLoan($loan);
-                $this->loanPayments->syncStatusesForLoan($loan);
-            } else {
-                if ($parentBalance) {
-                    $loanAmountCents = (int) $loan->amount * 100;
-                    $parentUser = $loan->parent()->firstOrFail();
-                    $parentMoneyUsedBefore = BalanceHelper::parentMoneyUsedCents($parentUser);
-                    $parentMoneyUsedAfter = max($parentMoneyUsedBefore - $loanAmountCents, 0);
+                    $lockedLoan->due_date = $this->effectiveDueDateForActivation($lockedLoan);
 
-                    $parentBalance->movements()->create([
+                    $childBalance->amount = (int) $childBalance->amount + $loanAmountCents;
+                    $childBalance->save();
+                    $childBalance->movements()->create([
                         'amount_added' => $loanAmountCents,
-                        'movement_type' => 'loan_refund',
-                        'note' => 'Loan rejected by child',
-                        'resulting_balance' => $parentMoneyUsedAfter,
+                        'movement_type' => 'loan_credit',
+                        'note' => 'Loan accepted by child',
+                        'resulting_balance' => $childBalance->amount,
                     ]);
+
+                    $lockedLoan->status = 'approved';
+                    $lockedLoan->rejection_reason = null;
+                    $lockedLoan->funds_disbursed_at = now();
+                    $lockedLoan->responded_at = now();
+                    $lockedLoan->save();
+                    $this->loanPayments->ensurePaymentsForLoan($lockedLoan);
+                    $this->loanPayments->syncStatusesForLoan($lockedLoan);
+                } else {
+                    if (! $lockedLoan->funds_released_at && ! $lockedLoan->funds_disbursed_at) {
+                        $parentUser = $lockedLoan->parent()->firstOrFail();
+                        $parentBalance->movements()->create([
+                            'amount_added' => $reservedCents,
+                            'movement_type' => 'loan_refund',
+                            'note' => 'Loan rejected by child',
+                            'resulting_balance' => max(BalanceHelper::parentMoneyUsedCents($parentUser) - $reservedCents, 0),
+                        ]);
+                        $lockedLoan->funds_released_at = now();
+                    }
+
+                    $lockedLoan->status = 'rejected';
+                    $lockedLoan->rejection_reason = trim((string) $validated['reason']);
+                    $lockedLoan->responded_at = now();
+                    $lockedLoan->save();
                 }
 
-                $loan->status = 'rejected';
-                $loan->rejection_reason = trim((string) $validated['reason']);
-            }
+                $lockedLoan->load(['parent:id,name,email,role', 'child:id,name,username']);
+                $amountText = $this->notifications->money($reservedCents);
+                if ($validated['action'] === 'accept') {
+                    $this->notifications->recordForMember(
+                        $child->id,
+                        'aceptacion',
+                        'prestamos',
+                        'Aceptaste un prestamo por '.$amountText.'.'
+                    );
+                    $this->notifications->recordForParent(
+                        $lockedLoan->parent_user_id,
+                        'aceptacion',
+                        'prestamos',
+                        $child->name.' acepto un prestamo por '.$amountText.'.'
+                    );
+                } else {
+                    $this->notifications->recordForMember(
+                        $child->id,
+                        'rechazo',
+                        'prestamos',
+                        'Rechazaste una oferta de prestamo por '.$amountText.'.'
+                    );
+                    $this->notifications->recordForParent(
+                        $lockedLoan->parent_user_id,
+                        'rechazo',
+                        'prestamos',
+                        $child->name.' rechazo una oferta de prestamo por '.$amountText.'.'
+                    );
+                }
 
-            $loan->responded_at = now();
-            $loan->save();
-
-            $loan = $loan->fresh(['parent:id,name,email', 'child:id,name,username']);
-            $amountText = $this->notifications->money((int) $loan->amount * 100);
-
-            if ($validated['action'] === 'accept') {
-                $this->notifications->recordForMember(
-                    $child->id,
-                    'aceptacion',
-                    'prestamos',
-                    'Aceptaste un prestamo por '.$amountText.'.'
-                );
-                $this->notifications->recordForParent(
-                    $loan->parent_user_id,
-                    'aceptacion',
-                    'prestamos',
-                    $child->name.' acepto un prestamo por '.$amountText.'.'
-                );
-            } else {
-                $this->notifications->recordForMember(
-                    $child->id,
-                    'rechazo',
-                    'prestamos',
-                    'Rechazaste un prestamo por '.$amountText.'.'
-                );
-                $this->notifications->recordForParent(
-                    $loan->parent_user_id,
-                    'rechazo',
-                    'prestamos',
-                    $child->name.' rechazo un prestamo por '.$amountText.'.'
-                );
-            }
-
-            return [
-                'loan' => $loan,
-                'member_balance_cents' => (int) $childBalance->amount,
-            ];
-        });
+                return [
+                    'loan' => $this->presentLoan($lockedLoan->loadMissing(['payments' => fn ($query) => $query->orderBy('installment_number')]))->toArray(),
+                    'member_balance_cents' => (int) $childBalance->amount,
+                    'remaining_balance' => BalanceHelper::parentMoneyUsedCents($lockedLoan->parent),
+                ];
+            });
+        } catch (\RuntimeException $exception) {
+            return match ($exception->getMessage()) {
+                'LOAN_FORBIDDEN' => response()->json(['message' => 'Esta oferta no pertenece a tu cuenta.'], 403),
+                'LOAN_NOT_OFFERED' => response()->json(['message' => 'El prestamo ya no esta pendiente de respuesta.'], 422),
+                'RESERVATION_NOT_FOUND', 'RESERVATION_AMOUNT_MISMATCH' => response()->json(['message' => 'La reserva del prestamo no coincide con sus condiciones.'], 422),
+                default => throw $exception,
+            };
+        }
 
         return response()->json([
-            'message' => $validated['action'] === 'accept' ? 'Loan accepted.' : 'Loan rejected.',
-            'loan' => $this->presentLoan($result['loan']->loadMissing(['payments' => fn ($query) => $query->orderBy('installment_number')])),
+            'message' => $validated['action'] === 'accept' ? 'Prestamo aceptado.' : 'Oferta rechazada.',
+            'loan' => $result['loan'],
             'member_balance_cents' => $result['member_balance_cents'],
             'member_balance_display' => BalanceHelper::displayCents((int) $result['member_balance_cents']),
+            'remaining_balance' => $result['remaining_balance'],
+            'remaining_balance_display' => BalanceHelper::displayCents((int) $result['remaining_balance']),
         ]);
     }
 
@@ -706,8 +816,301 @@ class LoanController extends Controller
         ]);
     }
 
+    private function buildLoanTermsFromParentInput(array $validated): array
+    {
+        $amountCents = $this->moneyInputToCents($validated['amount']);
+        $hasInterest = filter_var($validated['has_interest'], FILTER_VALIDATE_BOOLEAN);
+        $interestMode = (string) $validated['interest_mode'];
+        $dueDate = \Carbon\Carbon::parse($validated['due_date'])->toDateString();
+        $rate = (float) $validated['annual_interest_rate'];
+        $fixedInterestCents = $this->moneyInputToCents($validated['fixed_interest_amount']);
+
+        if (! $hasInterest) {
+            if ($rate != 0.0 || $fixedInterestCents !== 0) {
+                throw new \InvalidArgumentException('Sin interes, annual_interest_rate y fixed_interest_amount deben ser cero.');
+            }
+
+            return $this->buildLoanTerms(
+                $amountCents,
+                (int) $validated['installments_count'],
+                (string) $validated['installment_frequency'],
+                $dueDate,
+                false,
+                'percent',
+                0.0,
+                0
+            );
+        }
+
+        if ($interestMode === 'percent') {
+            if ($rate <= 0 || $fixedInterestCents !== 0) {
+                throw new \InvalidArgumentException('Para interes porcentual, indica una tasa mayor que cero y fixed_interest_amount en cero.');
+            }
+
+            return $this->buildLoanTerms(
+                $amountCents,
+                (int) $validated['installments_count'],
+                (string) $validated['installment_frequency'],
+                $dueDate,
+                true,
+                'percent',
+                $rate,
+                0
+            );
+        }
+
+        if ($fixedInterestCents <= 0 || $rate != 0.0) {
+            throw new \InvalidArgumentException('Para interes fijo, indica fixed_interest_amount mayor que cero y annual_interest_rate en cero.');
+        }
+
+        return $this->buildLoanTerms(
+            $amountCents,
+            (int) $validated['installments_count'],
+            (string) $validated['installment_frequency'],
+            $dueDate,
+            true,
+            'fixed',
+            0.0,
+            $fixedInterestCents
+        );
+    }
+
+    private function buildLoanTerms(
+        int $amountCents,
+        int $installmentsCount,
+        string $frequency,
+        string $dueDate,
+        bool $hasInterest,
+        string $interestMode,
+        float $rate,
+        int $fixedInterestCents
+    ): array {
+        if (! LoanAmountGuard::isPositive($amountCents, 1, 1)) {
+            throw new \InvalidArgumentException('El monto del prestamo debe ser mayor que cero.');
+        }
+
+        if (! $hasInterest) {
+            $rate = 0.0;
+            $fixedInterestCents = 0;
+            $interestMode = 'percent';
+            $interestCents = 0;
+        } elseif ($interestMode === 'fixed') {
+            $interestCents = $fixedInterestCents;
+        } else {
+            $rateBasisPoints = (int) round($rate * 100);
+            $interestCents = intdiv(($amountCents * $rateBasisPoints) + 5000, 10000);
+        }
+
+        $totalCents = $amountCents + $interestCents;
+        if ($totalCents > 99_999_999_999_999) {
+            throw new \InvalidArgumentException('El total del prestamo supera el limite permitido.');
+        }
+        if ($totalCents < $installmentsCount) {
+            throw ValidationException::withMessages([
+                'amount' => ['El monto debe permitir cuotas de al menos un centavo.'],
+            ]);
+        }
+        $installmentCents = intdiv($totalCents + $installmentsCount - 1, $installmentsCount);
+        LoanAmountGuard::assertPositive($amountCents, $totalCents, $installmentCents);
+
+        return [
+            'amount' => $this->moneyFromCents($amountCents),
+            'reason' => null,
+            'due_date' => $dueDate,
+            'installments_count' => $installmentsCount,
+            'installment_frequency' => $frequency,
+            'has_interest' => $hasInterest,
+            'interest_mode' => $interestMode,
+            'annual_interest_rate' => $rate,
+            'fixed_interest_amount' => $this->moneyFromCents($fixedInterestCents),
+            'total_amount' => $this->moneyFromCents($totalCents),
+            'installment_amount' => $this->moneyFromCents($installmentCents),
+            'amount_cents' => $amountCents,
+            'total_amount_cents' => $totalCents,
+            'installment_amount_cents' => $installmentCents,
+        ];
+    }
+
+    private function persistedLoanTerms(array $terms): array
+    {
+        return [
+            'amount' => $terms['amount'],
+            'due_date' => $terms['due_date'],
+            'installments_count' => $terms['installments_count'],
+            'installment_frequency' => $terms['installment_frequency'],
+            'has_interest' => $terms['has_interest'],
+            'interest_mode' => $terms['interest_mode'],
+            'annual_interest_rate' => $terms['annual_interest_rate'],
+            'fixed_interest_amount' => $terms['fixed_interest_amount'],
+            'total_amount' => $terms['total_amount'],
+            'installment_amount' => $terms['installment_amount'],
+        ];
+    }
+
+    private function loanHasSameTerms(Loan $loan, array $terms): bool
+    {
+        return BalanceHelper::parseMoneyToCents((string) $loan->amount) === $terms['amount_cents']
+            && ($loan->proposed_due_date ?? $loan->initial_due_date)?->toDateString() === $terms['due_date']
+            && (int) $loan->installments_count === (int) $terms['installments_count']
+            && $loan->installment_frequency === $terms['installment_frequency']
+            && (bool) $loan->has_interest === (bool) $terms['has_interest']
+            && $loan->interest_mode === $terms['interest_mode']
+            && (int) round((float) $loan->annual_interest_rate * 100) === (int) round((float) $terms['annual_interest_rate'] * 100)
+            && BalanceHelper::parseMoneyToCents((string) $loan->fixed_interest_amount)
+                === BalanceHelper::parseMoneyToCents((string) $terms['fixed_interest_amount'])
+            && BalanceHelper::parseMoneyToCents((string) $loan->total_amount) === $terms['total_amount_cents']
+            && BalanceHelper::parseMoneyToCents((string) $loan->installment_amount) === $terms['installment_amount_cents'];
+    }
+
+    private function lockOrCreateBalance(int $userId): Balance
+    {
+        $balance = Balance::query()->where('user_id', $userId)->lockForUpdate()->first();
+        if ($balance) {
+            return $balance;
+        }
+
+        Balance::query()->firstOrCreate(['user_id' => $userId], ['amount' => 0]);
+
+        return Balance::query()->where('user_id', $userId)->lockForUpdate()->firstOrFail();
+    }
+
+    private function disbursePendingLoan(\App\Models\User $parent, Loan $loan): array
+    {
+        $parentBalance = $this->lockOrCreateBalance((int) $parent->id);
+        $childBalance = $this->lockOrCreateBalance((int) $loan->child_user_id);
+        $amountCents = BalanceHelper::parseMoneyToCents((string) $loan->amount);
+        $parentMoneyUsedAfter = BalanceHelper::parentMoneyUsedCents($parent) + $amountCents;
+
+        // A child request does not start its repayment clock until the parent approves it.
+        if ($loan->requested_months !== null) {
+            $loan->due_date = now()->startOfDay()->addMonthNoOverflow()->toDateString();
+        }
+
+        $parentBalance->movements()->create([
+            'amount_added' => $amountCents,
+            'movement_type' => 'loan_debit',
+            'note' => 'Loan approved by parent',
+            'resulting_balance' => $parentMoneyUsedAfter,
+        ]);
+        $childBalance->amount = (int) $childBalance->amount + $amountCents;
+        $childBalance->save();
+        $childBalance->movements()->create([
+            'amount_added' => $amountCents,
+            'movement_type' => 'loan_credit',
+            'note' => 'Loan approved by parent',
+            'resulting_balance' => $childBalance->amount,
+        ]);
+
+        $loan->status = 'approved';
+        $loan->rejection_reason = null;
+        $loan->responded_at = now();
+        $loan->parent_reviewed_at = $loan->parent_reviewed_at ?? now();
+        $loan->funds_disbursed_at = now();
+        $loan->save();
+        $this->loanPayments->ensurePaymentsForLoan($loan);
+        $this->loanPayments->syncStatusesForLoan($loan);
+
+        $loan->load(['parent:id,name,email,role', 'child:id,name,username']);
+        $amountText = $this->notifications->money($amountCents);
+        $childName = $loan->child?->name ?? 'un integrante';
+        $this->notifications->recordForParent(
+            $parent->id,
+            'aprobacion',
+            'prestamos',
+            'Aprobaste un prestamo por '.$amountText.' para '.$childName.'.'
+        );
+        $this->notifications->recordForMember(
+            $loan->child_user_id,
+            'aprobacion',
+            'prestamos',
+            'Tu prestamo por '.$amountText.' fue aprobado.'
+        );
+
+        return [
+            'loan' => $this->presentLoan($loan->load(['payments' => fn ($query) => $query->orderBy('installment_number')]))->toArray(),
+            'remaining_balance' => $parentMoneyUsedAfter,
+            'child_balance_cents' => (int) $childBalance->amount,
+        ];
+    }
+
+    private function approvedLoanResponseData(Loan $loan): array
+    {
+        $loan->loadMissing(['parent:id,name,email,role', 'child:id,name,username']);
+        $loan->loadMissing(['payments' => fn ($query) => $query->orderBy('installment_number')]);
+        $childBalanceCents = (int) ($loan->child?->balance()->value('amount') ?? 0);
+
+        return [
+            'loan' => $this->presentLoan($loan)->toArray(),
+            'remaining_balance' => BalanceHelper::parentMoneyUsedCents($loan->parent),
+            'child_balance_cents' => $childBalanceCents,
+            'member_balance_cents' => $childBalanceCents,
+        ];
+    }
+
+    private function proposalResponseData(Loan $loan, ?int $parentMoneyUsed = null): array
+    {
+        $loan->loadMissing(['parent:id,name,email,role', 'child:id,name,username']);
+        $loan->loadMissing(['payments' => fn ($query) => $query->orderBy('installment_number')]);
+
+        return [
+            'loan' => $this->presentLoan($loan)->toArray(),
+            'remaining_balance' => $parentMoneyUsed ?? BalanceHelper::parentMoneyUsedCents($loan->parent),
+            'child_balance_cents' => (int) ($loan->child?->balance()->value('amount') ?? 0),
+        ];
+    }
+
+    private function loanActionResponse(array $result, string $message): JsonResponse
+    {
+        return response()->json([
+            'message' => $message,
+            'loan' => $result['loan'],
+            'remaining_balance' => $result['remaining_balance'],
+            'remaining_balance_display' => BalanceHelper::displayCents((int) $result['remaining_balance']),
+            'child_balance_cents' => $result['child_balance_cents'],
+            'child_balance_display' => BalanceHelper::displayCents((int) $result['child_balance_cents']),
+        ]);
+    }
+
+    private function moneyFromCents(int $cents): string
+    {
+        return intdiv($cents, 100).'.'.str_pad((string) ($cents % 100), 2, '0', STR_PAD_LEFT);
+    }
+
+    private function moneyInputToCents(string|int|float $value): int
+    {
+        return BalanceHelper::parseMoneyToCents(is_float($value) ? number_format($value, 2, '.', '') : $value);
+    }
+
+    private function effectiveDueDateForActivation(Loan $loan): string
+    {
+        if ($loan->requested_months !== null
+            && $loan->proposed_due_date->toDateString() === $loan->initial_due_date->toDateString()) {
+            $activation = now()->startOfDay();
+
+            return match ($loan->installment_frequency) {
+                'weekly' => $activation->addWeek()->toDateString(),
+                'biweekly' => $activation->addDays(14)->toDateString(),
+                default => $activation->addMonthNoOverflow()->toDateString(),
+            };
+        }
+
+        $dueDate = $loan->proposed_due_date->copy()->startOfDay();
+        $offerStartedAt = $loan->parent_reviewed_at ?? $loan->created_at;
+
+        $pendingDays = max(
+            0,
+            (int) $offerStartedAt->copy()->startOfDay()->diffInDays(now()->startOfDay())
+        );
+
+        return $dueDate->addDays($pendingDays)->toDateString();
+    }
+
     private function presentLoan(Loan $loan): Loan
     {
+        if ($loan->status === 'offered' && ! $loan->funds_disbursed_at) {
+            $loan->due_date = $this->effectiveDueDateForActivation($loan);
+        }
+
         $summary = $this->loanPayments->buildSummary($loan);
         $loan->setAttribute('payment_summary', $summary);
 

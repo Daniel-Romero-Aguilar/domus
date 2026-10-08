@@ -91,6 +91,8 @@ class LogFailedUserActions
 
         return match (true) {
             str_contains($path, 'loan-payments') => 'PAGO DE PRESTAMO FALLIDO',
+            str_contains($path, '/loans/') && str_contains($path, 'review') => 'REVISION DE PRESTAMO FALLIDA',
+            str_contains($path, '/loans/') && str_contains($path, 'reject') => 'RECHAZO DE PRESTAMO FALLIDO',
             str_contains($path, '/loans/') && str_contains($path, 'approve') => 'PRESTAMO APROBADO FALLIDO',
             str_contains($path, '/loans/') && str_contains($path, 'respond') => 'RESPUESTA DE PRESTAMO FALLIDA',
             str_ends_with($path, '/loans') => 'PRESTAMO SOLICITADO FALLIDO',
@@ -117,6 +119,8 @@ class LogFailedUserActions
 
         return match (true) {
             str_contains($path, 'loan-payments') => 'registrar el pago de una cuota de prestamo',
+            str_contains($path, '/loans/') && str_contains($path, 'review') => 'revisar una solicitud de prestamo',
+            str_contains($path, '/loans/') && str_contains($path, 'reject') => 'rechazar una solicitud de prestamo',
             str_contains($path, 'loans') => 'crear o cambiar el estado de un prestamo',
             str_contains($path, 'allowances') => 'crear o ejecutar una mesada',
             str_contains($path, 'goals') => 'crear o modificar una meta',
@@ -140,6 +144,8 @@ class LogFailedUserActions
 
         return match (true) {
             str_contains($path, 'loan-payments') => 'pagar cuota de prestamo',
+            str_contains($path, '/loans/') && str_contains($path, 'review') => 'proponer condiciones de prestamo',
+            str_contains($path, '/loans/') && str_contains($path, 'reject') => 'rechazar solicitud de prestamo',
             str_contains($path, '/loans/') && str_contains($path, 'approve') => 'aprobar prestamo',
             str_contains($path, '/loans/') && str_contains($path, 'respond') => 'aceptar o rechazar oferta de prestamo',
             str_ends_with($path, '/loans') => 'solicitar u ofrecer prestamo',

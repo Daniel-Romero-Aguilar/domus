@@ -6,23 +6,23 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Support\LoanAmountGuard;
+use App\Support\BalanceHelper;
 
 class Loan extends Model
 {
     protected static function booted(): void
     {
         static::saving(function (Loan $loan): void {
-            // Existing legacy rows are not rewritten just because another
-            // attribute changes, but every new monetary value must be > 0.
+            // Every persisted loan amount must remain positive.
             $fields = ['amount', 'total_amount', 'installment_amount'];
             if ($loan->exists && ! collect($fields)->contains(fn (string $field): bool => $loan->isDirty($field))) {
                 return;
             }
 
             LoanAmountGuard::assertPositive(
-                (int) $loan->getAttribute('amount'),
-                (int) $loan->getAttribute('total_amount'),
-                (int) $loan->getAttribute('installment_amount'),
+                BalanceHelper::parseMoneyToCents((string) $loan->getAttribute('amount')),
+                BalanceHelper::parseMoneyToCents((string) $loan->getAttribute('total_amount')),
+                BalanceHelper::parseMoneyToCents((string) $loan->getAttribute('installment_amount')),
             );
         });
     }
@@ -34,16 +34,34 @@ class Loan extends Model
     protected $casts = [
         'parent_user_id' => 'integer',
         'child_user_id' => 'integer',
-        'amount' => 'integer',
+        'amount' => 'decimal:2',
         'due_date' => 'date',
         'installments_count' => 'integer',
         'has_interest' => 'boolean',
         'annual_interest_rate' => 'float',
-        'fixed_interest_amount' => 'integer',
+        'fixed_interest_amount' => 'decimal:2',
         'responded_at' => 'datetime',
         'requested_by_user_id' => 'integer',
-        'total_amount' => 'integer',
-        'installment_amount' => 'integer',
+        'total_amount' => 'decimal:2',
+        'installment_amount' => 'decimal:2',
+        'requested_amount' => 'decimal:2',
+        'requested_reason' => 'string',
+        'requested_months' => 'integer',
+        'initial_due_date' => 'date',
+        'initial_installments_count' => 'integer',
+        'initial_installment_frequency' => 'string',
+        'initial_has_interest' => 'boolean',
+        'initial_interest_mode' => 'string',
+        'initial_annual_interest_rate' => 'float',
+        'initial_fixed_interest_amount' => 'decimal:2',
+        'initial_total_amount' => 'decimal:2',
+        'initial_installment_amount' => 'decimal:2',
+        'proposed_due_date' => 'date',
+        'parent_reviewed_at' => 'datetime',
+        'reserved_amount_cents' => 'integer',
+        'funds_reserved_at' => 'datetime',
+        'funds_released_at' => 'datetime',
+        'funds_disbursed_at' => 'datetime',
     ];
 
     protected $fillable = [
@@ -64,6 +82,24 @@ class Loan extends Model
         'requested_by_user_id',
         'total_amount',
         'installment_amount',
+        'requested_amount',
+        'requested_reason',
+        'requested_months',
+        'initial_due_date',
+        'initial_installments_count',
+        'initial_installment_frequency',
+        'initial_has_interest',
+        'initial_interest_mode',
+        'initial_annual_interest_rate',
+        'initial_fixed_interest_amount',
+        'initial_total_amount',
+        'initial_installment_amount',
+        'proposed_due_date',
+        'parent_reviewed_at',
+        'reserved_amount_cents',
+        'funds_reserved_at',
+        'funds_released_at',
+        'funds_disbursed_at',
     ];
 
     public function parent(): BelongsTo
@@ -81,15 +117,15 @@ class Loan extends Model
         return $this->hasMany(LoanPayment::class)->orderBy('installment_number');
     }
 
-    public function getInstallmentPlanAttribute(): array
+    public function getInstallmentPlanAttribute(): ?array
     {
-        return $this->installmentPlan();
+        return in_array($this->status, ['approved', 'paid'], true) ? $this->installmentPlan() : null;
     }
 
     public function installmentPlan(): array
     {
         $count = max(1, (int) $this->installments_count);
-        $totalCents = max(0, (int) $this->total_amount * 100);
+        $totalCents = max(0, BalanceHelper::parseMoneyToCents((string) $this->total_amount));
         $baseCents = intdiv($totalCents, $count);
         $extraPayments = $totalCents % $count;
         $basePayments = $count - $extraPayments;
@@ -132,7 +168,7 @@ class Loan extends Model
         }
 
         if ($paidInstallments >= $count) {
-            return max(0, (int) $this->total_amount * 100);
+            return max(0, BalanceHelper::parseMoneyToCents((string) $this->total_amount));
         }
 
         $paidCents = 0;

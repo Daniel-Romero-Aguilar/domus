@@ -14,13 +14,15 @@ Flutter usage notes
 - Parent and child/member screens should be separate pages/providers, not one giant role-conditional page.
 - After POST actions, update UI with the returned entity/balance first, then refresh the list if needed.
 - If an action returns unlocked_badges, show a badge earned modal/toast.
-- Cobertura: este archivo refleja las 56 combinaciones metodo/ruta definidas en `routes/api.php`. Las rutas web de Blade/admin no son endpoints de esta API y no se mezclan aqui.
+- Cobertura: este archivo refleja las 59 combinaciones metodo/ruta definidas en `routes/api.php`. Las rutas web de Blade/admin no son endpoints de esta API y no se mezclan aqui.
+- Para campos de entrada con regla Laravel `integer`, se aceptan enteros JSON y cadenas que `FILTER_VALIDATE_INT` reconozca como enteros; `boolean` admite booleanos JSON, `0`, `1`, `"0"` y `"1"`; `numeric` admite números JSON y cadenas numéricas. Las reglas `string`, `regex`, `in`, `min` y `max` de cada endpoint restringen además estos conjuntos. Los tipos declarados de salida se refieren al JSON serializado, no al tipo del campo de entrada.
 
 Convencion monetaria
 - Los campos `*_cents` son enteros en centavos de MXN. Ejemplo: `10000` = `$100.00`.
 - Los campos `*_display` son textos ya formateados, por ejemplo `"$100.00"`.
 - Algunos modulos reciben dinero como `string` en el body, por ejemplo `"20.50"`.
-- Prestamos y tareas tienen campos principales en pesos enteros: `loan.amount: 100` y `task.reward_amount: 100` significan `$100.00`; no dividirlos entre 100.
+- Donde se indica "formato monetario normal" para un `string` de entrada, la validacion usa `^\d+(?:[.,]\d{1,2})?$`: dígitos sin signo ni separador de miles, seguidos opcionalmente de `.` o `,` y uno o dos decimales. Cada endpoint determina por separado si acepta cero.
+- Los importes principales del prestamo (`loan.amount`, `loan.total_amount`, `loan.installment_amount`, `loan.fixed_interest_amount` y sus snapshots) se serializan como cadenas decimales MXN con dos posiciones, por ejemplo `"100.00"` = `$100.00`; no dividirlos entre 100. `task.reward_amount` conserva su contrato propio de pesos enteros.
 - En cada endpoint se especifica si un nombre ambiguo como `remaining_balance` representa centavos o pesos.
 
 Tipos compartidos
@@ -37,6 +39,7 @@ User = {
   username: string|null,
   role: "parent"|"child"|"member",
   email_verified_at: ISODateTime,
+  two_factor_confirmed_at: string|null,
   current_team_id: integer|null,
   profile_photo_path: string|null,
   created_at: ISODateTime,
@@ -47,20 +50,24 @@ User = {
 }
 
 UserChild = { id: integer, name: string, username: string|null, profile_photo_url: string, balance_cents: integer, balance_display: string }
-UserParent = { id: integer, name: string, email: string|null, profile_photo_url: string, balance_cents: integer, balance_display: string }
-# Las relaciones UserChild/UserParent pueden omitir columnas base no seleccionadas; conservan identidad y los accessors profile_photo_url, balance_cents y balance_display.
+UserParent = { id: integer, name: string, email: string|null, role: "parent", profile_photo_url: string, balance_cents: integer, balance_display: string }
+UserParentCompact = { id: integer, name: string, profile_photo_url: string, balance_cents: integer, balance_display: string }
+FamilyMemberUser = { id: integer, name: string, username: string|null, role: "child"|"member", profile_photo_url: string, balance_cents: integer, balance_display: string }
+TaskActor = { id: integer, name: string, profile_photo_url: string, balance_cents: integer, balance_display: string }
+# Las relaciones anteriores enumeran las columnas seleccionadas por cada endpoint y los accessors añadidos por User. Las claves no seleccionadas no aparecen en el JSON.
 DomusLevel = { id: integer, level_number: integer, name: string, min_points: integer, max_points: integer, definition: string|null }
 Points = { historical: integer, earned: integer, spent: integer, available: integer }
 DomusPoints = { points: Points, level: DomusLevel|null }
-Badge = { id: integer, slug: string, title: string, description: string|null, text: string|null, image_url: string|null, points_reward: integer }
+Badge = { id: integer, slug: string, title: string, description: string|null, text: string, image_url: string|null, points_reward: integer }
 DomusReward = { id: integer, parent_user_id: integer, title: string, description: string|null, points_cost: integer, is_active: boolean, created_at: string, updated_at: string }
+BalanceRecord = { id: integer, user_id: integer, amount: valor DB sin cast JSON garantizado, created_at: string, updated_at: string }
 ```
 
 Auth
 POST /api/register
 Auth: none
 Body: name, email, password, password_confirmation, terms_accepted
-Body types: `name:string`, `email:string`, `password:string` (min 8), `password_confirmation:string`, `terms_accepted:boolean=true`.
+Body types: `name:string` requerido (max 255), `email:string` requerido (formato email, max 255, unico), `password:string` requerido (min 8), `password_confirmation:string` requerido e igual a password, `terms_accepted` requerido por la regla Laravel `accepted` (acepta `yes`, `on`, `1`, `true` o booleano `true`).
 Success `201`:
 ```json
 { "message": "string", "token": "string", "user": { "id": "integer", "name": "string", "email": "string" } }
@@ -70,7 +77,7 @@ The created account has role `parent` and an initial zero balance.
 POST /api/login
 Auth: none
 Body: login, password
-Body types: `login:string` (email or username), `password:string`.
+Body types: `login:string` requerido (email o username, max 255), `password:string` requerido.
 Success `200`:
 ```json
 {
@@ -87,7 +94,7 @@ Success `200`:
 ```json
 { "user": "User", "parent_admin_name": "string|null", "is_family_member": "boolean" }
 ```
-For a child/member, `user` includes the loaded balance; the appended `balance_cents` and `balance_display` are always part of the serialized user.
+For a child/member, `user` includes the loaded `balance:BalanceRecord|null` relation; for a parent that relation key is absent. The appended `balance_cents` and `balance_display` are always part of the serialized user. `balance.amount` comes from an Eloquent model without a cast, so use `balance_cents` for a JSON integer with a guaranteed type.
 
 GET /api/user
 Auth: bearer token
@@ -96,11 +103,12 @@ Success `200`: serialized `User` object directly (not wrapped in `{user:...}`).
 POST /api/logout
 Auth: bearer token
 Success `200`: `{ "message": "string" }`. The current Sanctum token is revoked.
+`config/sanctum.php` sets token `expiration` to `null`, and login/register create tokens without an individual expiration. There is no refresh-token endpoint. A `401` after authentication means the token is missing, invalid or revoked, or the server configuration has changed.
 
 GET /api/notifications
 Auth: bearer token
 Query optional: limit
-`limit` is integer, default `20`, clamped to `1..50`.
+`limit` se convierte con `(int)` sin validación previa; si falta usa `20` y el resultado se limita a `1..50` (por ejemplo, texto no numérico se convierte a `0` y termina en `1`).
 Success `200`:
 ```json
 {
@@ -127,6 +135,7 @@ Success `200`:
 ```json
 { "levels": ["DomusLevel"] }
 ```
+Solo incluye niveles con `is_active = true`.
 
 GET /api/parent/domus-points
 Auth: parent
@@ -146,22 +155,23 @@ Success `200`:
     }
   ],
   "rewards": ["DomusRewardParent"],
-  "redemptions": ["RedemptionSummary"]
+  "redemptions": ["ParentRedemptionSummary"]
 }
 ```
 `DomusRewardParent` = `{ id: integer, parent_user_id: integer, title: string, description: string|null, points_cost: integer, is_active: boolean, redemptions_count: integer, created_at: string, updated_at: string }`.
-`RedemptionSummary` = `{ id: integer, reward_title: string|null, child_name: string|null, points_spent: integer, status: string, created_at: string }`.
+`ParentRedemptionSummary` = `{ id: integer, reward_title: string|null, child_name: string|null, points_spent: integer, status: string, created_at: string }`.
+`ChildRedemptionSummary` = `{ id: integer, reward_title: string|null, points_spent: integer, status: string, created_at: string }`.
 
 POST /api/parent/domus-points/rewards
 Auth: parent
 Body: title, description, points_cost
-Body types: `title:string`, `description:string|null`, `points_cost:integer` min `1`.
+Body types: `title:string` requerido (max 120), `description:string|null` opcional (max 255), `points_cost:integer` requerido (min `1`).
 Success `201`: `{ "message": "string", "reward": "DomusReward" }`.
 
 POST /api/parent/domus-points/redemptions/{redemption}/pay
 Auth: parent
 Path `redemption`: integer redemption ID.
-Success `200`: `{ "message": "string", "redemption": "RedemptionSummary" }`.
+Success `200`: `{ "message": "string", "redemption": "ParentRedemptionSummary" }`.
 The redemption must belong to the authenticated parent and not already have status `paid`.
 
 GET /api/child/domus-points
@@ -173,7 +183,7 @@ Success `200`:
   "level": "DomusLevel|null",
   "badges": ["UserBadge"],
   "rewards": ["DomusRewardChild"],
-  "redemptions": ["RedemptionSummary"]
+  "redemptions": ["ChildRedemptionSummary"]
 }
 ```
 `UserBadge` = `{ id: integer, slug: string, title: string, description: string|null, image_url: string|null, points_reward: integer, is_completed: boolean, completed_at: string|null }`.
@@ -199,7 +209,7 @@ Success `200`:
 POST /api/child/goals
 Auth: child/member
 Body: name, description, target_amount optional
-Body types: `name:string`, `description:string|null`, `target_amount:string|null` in normal money format (`20`, `20.5`, `20.50`).
+Body types: `name:string` requerido (max 120), `description:string|null` opcional (max 255), `target_amount:string|null` opcional en formato monetario normal (`20`, `20.5`, `20.50`). Si se proporciona un objetivo distinto de `"0"`, debe ser mayor que cero. El código actual interpreta exactamente `"0"` como si no se hubiera enviado objetivo y guarda `target_amount_cents:null`.
 Success `201`: `{ "message": "string", "goal": "Goal" }`.
 
 POST /api/child/goals/{goal}/deposit
@@ -216,14 +226,14 @@ Success `200`:
   "balance_display": "string"
 }
 ```
-The operation fails with `422` if the balance is insufficient or the goal is not active.
+El importe debe ser mayor que cero. La operación falla con `422` si el saldo es insuficiente o la meta no está activa.
 
 POST /api/child/goals/{goal}/withdraw
 Auth: child/member
 Body: amount
 Body: `amount:string` normal money format.
 Success `200`: same shape as deposit, with the updated `goal` and balance.
-The operation fails with `422` if the saved amount is insufficient or the goal is canceled.
+El importe debe ser mayor que cero. La operación falla con `422` si el ahorro de la meta es insuficiente o la meta está cancelada.
 
 POST /api/child/goals/{goal}/complete
 Auth: child/member
@@ -238,6 +248,7 @@ Balance
 POST /api/balance/add
 Auth: bearer token
 Body: `amount:string`, normal money format with up to two decimals.
+El controlador no exige que sea mayor que cero; `"0"` pasa la validación y registra un movimiento de importe cero.
 Success `200`:
 ```json
 {
@@ -268,12 +279,13 @@ Transfers
 GET /api/transfers
 Auth: parent
 Success `200`: `{ "transfers": ["FamilyTransfer"] }` (latest 15).
-`FamilyTransfer` = `{ id: integer, parent_user_id: integer, child_user_id: integer, amount_cents: integer, idempotency_key: string, status: processing|completed|failed, parent_balance_before: integer|null, parent_balance_after: integer|null, child_balance_before: integer|null, child_balance_after: integer|null, failure_reason: string|null, executed_at: string|null, created_at: string, updated_at: string, parent: UserParent, child: UserChild }`.
+`FamilyTransfer` = `{ id: integer, parent_user_id: integer, child_user_id: integer, amount_cents: integer, idempotency_key: string, status: processing|completed|failed, parent_balance_before: integer|null, parent_balance_after: integer|null, child_balance_before: integer|null, child_balance_after: integer|null, failure_reason: string|null, executed_at: string|null, created_at: string, updated_at: string, parent: UserParentCompact, child: UserChild }`.
 
 POST /api/transfers
 Auth: parent
-Header: Idempotency-Key
-Body: `child_user_id:integer`, `amount:string` normal money format. Header `Idempotency-Key:string` required, max 120 chars.
+Header preferido: `Idempotency-Key`; como alternativa, body `idempotency_key:string`. Si están ambos, prevalece el header. Se recorta el valor, debe quedar no vacío y medir máximo 120 bytes.
+Body: `child_user_id:integer` requerido (users.id de la familia del padre), `amount:string` requerido en formato monetario normal (`.` o `,` decimal, 1 o 2 posiciones como máximo).
+La ruta no impone un mínimo positivo: `"0"` produce una transferencia completada de cero centavos.
 Success new transfer `201`:
 ```json
 {
@@ -287,7 +299,7 @@ Success new transfer `201`:
   "executed": true
 }
 ```
-Repeating the same idempotency key returns the existing transfer with `created:false` and normally status `200`.
+Repetir la clave del mismo padre devuelve la transferencia existente sin ejecutarla de nuevo; no comprueba si el nuevo `child_user_id` o `amount` coinciden con los originales. Si su estado es `completed`, responde `200` con `created:false`, `executed:true`; si es `processing` o `failed`, responde `422` con `created:false`, `executed:false`.
 Validation/family errors return `422`; the transfer is not duplicated.
 
 Cash withdrawals
@@ -297,21 +309,21 @@ Success `200`:
 ```json
 { "withdrawals": ["CashWithdrawal"], "requests": ["CashWithdrawal"], "all": ["CashWithdrawal"] }
 ```
-`CashWithdrawal` = `{ id: integer, amount_cents: integer, amount_display: string, status: pending_parent|pending_child|completed|canceled, status_label: string, parent: UserParent, child: UserChild, initiated_by: UserInitiator, parent_approved_at: string|null, child_approved_at: string|null, completed_at: string|null, canceled_at: string|null, created_at: string|null }`.
+`CashWithdrawal` = `{ id: integer, amount_cents: integer, amount_display: string, status: pending_parent|pending_child|completed|canceled, status_label: string, parent: UserParentCompact, child: UserChild, initiated_by: UserInitiator, parent_approved_at: string|null, child_approved_at: string|null, completed_at: string|null, canceled_at: string|null, created_at: string|null }`.
 `UserInitiator` contains `id`, `name`, `role`, `profile_photo_url`, `balance_cents`, `balance_display`.
 For a parent, `requests` are `pending_parent` and `withdrawals` are items initiated by that parent. For child/member, the equivalent status is `pending_child`.
 
 POST /api/parent/withdrawals
 Auth: parent
 Body: child_user_id, amount
-Body: `child_user_id:integer`, `amount:string` normal money format.
+Body: `child_user_id:integer` de la familia del padre, `amount:string` en formato monetario normal y mayor que cero. El saldo del integrante debe cubrirlo.
 Success `201`: `{ "message": "string", "withdrawal": "CashWithdrawal", "child_balance": { "balance_cents": "integer", "balance_display": "string" } }`.
 The withdrawal is reserved from the child's balance and waits for child acceptance.
 
 POST /api/child/withdrawals
 Auth: child/member
 Body: amount
-Body: `amount:string` normal money format.
+Body: `amount:string` en formato monetario normal y mayor que cero. El saldo del integrante debe cubrirlo.
 Success `201`: same shape, with a withdrawal waiting for parent acceptance.
 
 POST /api/withdrawals/{cashWithdrawal}/accept
@@ -333,11 +345,12 @@ Success `200`:
 {
   "members": ["FamilyMember"],
   "loan_targets": [
-    { "family_member_id": "integer", "user_id": "integer", "name": "string", "username": "string|null", "role": "child|member", "is_minor": "boolean-like" }
+    { "family_member_id": "integer", "user_id": "integer", "name": "string", "username": "string|null", "role": "child|member", "is_minor": "boolean" }
   ]
 }
 ```
-`FamilyMember` = `{ id: integer, parent_user_id: integer, user_id: integer, is_minor: boolean-like, guardian_declaration_accepted: boolean-like, created_at: string, updated_at: string, user: User }`.
+`FamilyMember` = `{ id: integer, parent_user_id: integer, user_id: integer, is_minor: valor DB 0/1 sin cast JSON garantizado, guardian_declaration_accepted: valor DB 0/1 sin cast JSON garantizado, created_at: string, updated_at: string, user: FamilyMemberUser }`.
+Los dos indicadores del modelo `FamilyMember` no tienen casts: la respuesta de creación puede serializarlos como booleanos y la de consulta como números según la hidratación del controlador y el driver. Solo `loan_targets[].is_minor` y `member.is_minor` del detalle se convierten explícitamente a `boolean`. Por ello, el backend actual no ofrece un único tipo JSON garantizado para los indicadores dentro de `FamilyMember`.
 
 GET /api/family-members-summary
 Auth: parent
@@ -355,7 +368,7 @@ Success `200`:
     "name": "string",
     "username": "string|null",
     "role": "child|member",
-    "is_minor": "boolean-like",
+    "is_minor": "boolean",
     "balance_cents": "integer",
     "balance_display": "string",
     "points": { "historical": "integer", "spent": "integer", "available": "integer" },
@@ -368,18 +381,18 @@ Success `200`:
   "loans": ["FamilyMemberLoan"]
 }
 ```
-`FamilyMemberLoan` = `{ id: integer, status: string, amount: integer (pesos MXN), total_amount: integer (pesos MXN), reason: string|null, due_date: string, installments_count: integer, installment_frequency: string, has_interest: boolean, annual_interest_rate: number, payment_summary: PaymentSummary, created_at: string }`.
+`FamilyMemberLoan` = `{ id: integer, status: string, amount: string (decimal MXN con 2 posiciones), total_amount: string (decimal MXN con 2 posiciones), reason: string|null, due_date: string (fecha serializada por Laravel), installments_count: integer, installment_frequency: string, has_interest: boolean, annual_interest_rate: number, payment_summary: PaymentSummary, created_at: string (ISO-8601) }`.
 Not belonging to the parent returns `404`.
 
 POST /api/family-members
 Auth: parent
 Body: name, username, password, password_confirmation, is_minor, guardian_declaration_accepted
-Body types: `name:string`, `username:string` (alphanumeric, min 3), `password:string` (min 8), confirmation, `is_minor:boolean`, `guardian_declaration_accepted:boolean`.
+Body types: `name:string` requerido (max 255), `username:string` requerido (alfanumérico, 3..255, único en users), `password:string` requerido (min 8) con `password_confirmation` igual; `is_minor` y `guardian_declaration_accepted` son booleanos opcionales/nullable y se interpretan como `false` cuando se omiten o son null.
 If `is_minor:true`, guardian declaration must be true.
 Success `201`: `{ "message": "string", "member": "FamilyMember" }`.
 
 Allowances
-`AllowanceBase` = `{ id: integer, parent_user_id: integer, child_user_id: integer, amount_cents: integer, next_payment_amount_cents: integer|null, frequency: daily|weekly|monthly|ten_seconds, start_at: string, next_run_at: string|null, first_payment_immediate: boolean, status: pending|active|paused, last_executed_at: string|null, last_failed_at: string|null, created_at: string, updated_at: string, child: UserChild, parent: UserParent }`.
+`AllowanceBase` = `{ id: integer, parent_user_id: integer, child_user_id: integer, amount_cents: integer, next_payment_amount_cents: integer|null, frequency: daily|weekly|monthly|ten_seconds, start_at: string, next_run_at: string|null, first_payment_immediate: boolean, status: pending|active|paused, last_executed_at: string|null, last_failed_at: string|null, created_at: string, updated_at: string, child: UserChild, parent: UserParentCompact }`.
 `amount_cents` is the permanent amount. `next_payment_amount_cents`, when non-null, is the one-time override for the next successful payment and is cleared after that payment. The current API writes only `pending`, `active` and `paused` to `status`.
 `AllowancePayment` = `{ id: integer, allowance_id: integer, scheduled_for: string, status: string, amount_cents: integer, parent_balance_before: integer|null, parent_balance_after: integer|null, child_balance_before: integer|null, child_balance_after: integer|null, executed_at: string|null, failed_at: string|null, failure_reason: string|null, created_at: string, updated_at: string }`.
 
@@ -404,6 +417,7 @@ POST /api/allowances
 Auth: parent
 Body: child_user_id, amount, frequency, first_payment_immediate, start_at
 Body types: `child_user_id:integer`, `amount:string` normal money format, `frequency:daily|weekly|monthly|ten_seconds`, `first_payment_immediate:boolean`, `start_at:date` required when immediate is false.
+El controlador no exige un mínimo positivo para `amount`; `"0"` se convierte en una mesada de cero centavos.
 The selected user must belong to the authenticated parent's family or the endpoint returns `422`. When `first_payment_immediate:true`, a supplied `start_at` is ignored; `start_at` is set to today and `next_run_at` to the current second.
 Success `201`:
 ```json
@@ -416,6 +430,7 @@ Auth: parent
 Path `allowance`: integer allowance ID owned by the parent.
 Body: amount, one_time optional, paused optional
 Body types: `amount:string` in normal money format (`20`, `20.5`, `20.50` or with a decimal comma), with up to two decimals; `one_time:boolean` defaults to `false`; `paused:boolean`.
+También se admite `"0"` como importe; el controlador no aplica una regla de mínimo positivo.
 Success `200`:
 ```json
 {
@@ -468,12 +483,16 @@ Savings boxes
 GET /api/savings-boxes
 Auth: family user
 Success `200`: `{ "savings_boxes": ["SavingsBox"] }`.
-For parent, each box includes `members: User[]` and `accounts: SavingsBoxAccount[]` for all members.
-For child/member, only active boxes where the user has an account are returned; each box includes `parent: UserParent` and the authenticated user's account(s).
-`SavingsBox` = `{ id: integer, parent_user_id: integer, name: string, duration_months: integer|null, duration_days: integer|null, cycle_days: integer|null, cycle_count: integer|null, plan_version: string|null, max_per_cycle_cents: integer|null, max_amount_cents: integer|null, starts_at: string|null, cutoff_at: string|null, delivery_date: string, benefit_percent: string|null (decimal with 2 places), benefit_mode: final_balance_simple|legacy_accrual|null, annual_gain_percent: string (compatibility field), allow_early_withdrawal: boolean, audience: all|specific, status: active|completed|string, settled_at: string|null, accepts_deposits: boolean, created_at: string, updated_at: string, parent: UserParent|null, members: User[], accounts: SavingsBoxAccount[] }`.
+For parent, each box includes `members: SavingsBoxMember[]` and `accounts: SavingsBoxAccount[]` for all enabled accounts; `parent` is absent.
+For child/member, only active boxes where the user has an account are returned; each box includes `parent: SavingsBoxParent` and only the authenticated user's account(s); `members` is absent.
+`SavingsBox` = `{ id: integer, parent_user_id: integer, name: string, duration_months: integer|null, duration_days: integer|null, cycle_days: integer|null, cycle_count: integer|null, plan_version: string|null, max_per_cycle_cents: integer|null, max_amount_cents: integer|null, starts_at: string|null, cutoff_at: string|null, delivery_date: string, benefit_percent: string|null (decimal with 2 places), benefit_mode: final_balance_simple|legacy_accrual|null, annual_gain_percent: string (compatibility field), allow_early_withdrawal: boolean, audience: all|specific, status: string, settled_at: string|null, created_at: string, updated_at: string }`.
+La API crea cajas con `status:active` y la liquidación escribe `completed`; el modelo no restringe los valores ya almacenados en filas anteriores.
+`SavingsBoxMember` = `UserChild` más el objeto `pivot` de la relación muchos a muchos (`savings_box_id`, `user_id`, `created_at`, `updated_at`). `SavingsBoxParent` = `UserParentCompact`.
+Solo el GET añade `accepts_deposits:boolean`. El `POST /api/savings-boxes` devuelve `members` y `accounts`, pero no `parent` ni `accepts_deposits`. En cajas `audience=all`, `members` queda vacío porque la API crea cuentas para toda la familia sin poblar la tabla pivote; la lista real de participantes está en `accounts[].user`.
 For new boxes, the plan is frozen when it is created. `duration_months`, `duration_days`, `cycle_days`, `cycle_count`, `plan_version`, `max_per_cycle_cents`, `max_amount_cents`, `starts_at`, `cutoff_at`, `benefit_percent` and `benefit_mode` must be read from the saved box; never recalculate an existing plan from current configuration. `delivery_date` and `annual_gain_percent` remain populated for compatibility, but `cutoff_at` and `benefit_percent` are the authoritative fields for new boxes.
 `max_per_cycle_cents` applies independently to each member account and each fixed-day cycle. `max_amount_cents` is derived as `max_per_cycle_cents * cycle_count` and limits the principal currently held by that member account. The final partial cycle receives the complete per-cycle allowance.
-`SavingsBoxAccount` = `{ id: integer, savings_box_id: integer, user_id: integer, principal_cents: integer, principal_pending_cents: integer, earned_interest_cents: integer, settled_principal_cents: integer, settled_benefit_cents: integer, settled_total_cents: integer, interest_remainder_microcents: integer, last_interest_accrued_on: string|null, interest_accrued_until_at: string|null, settled_at: string|null, current_cycle_number: integer|null, deposited_in_current_cycle_cents: integer|null, remaining_in_current_cycle_cents: integer|null, remaining_total_capacity_cents: integer|null, created_at: string, updated_at: string, user: UserChild|null }`.
+`SavingsBoxAccount` = `{ id: integer, savings_box_id: integer, user_id: integer, principal_cents: integer, principal_pending_cents: integer, earned_interest_cents: integer, settled_principal_cents: integer, settled_benefit_cents: integer, settled_total_cents: integer, interest_remainder_microcents: integer, last_interest_accrued_on: string|null, interest_accrued_until_at: string|null, settled_at: string|null, created_at: string, updated_at: string, user: UserChild|null }`.
+En el GET de cajas con plan nuevo, cada cuenta añade `current_cycle_number`, `deposited_in_current_cycle_cents`, `remaining_in_current_cycle_cents` y `remaining_total_capacity_cents` como `integer|null`. En el POST de creación y las acciones de depósito/retiro esas claves calculadas no se agregan al objeto `account`.
 The cycle usage fields are runtime values added by the GET response for new-plan accounts. Settlement fields remain zero/null until the final payout.
 
 GET /api/savings-boxes/creation-options
@@ -485,7 +504,7 @@ The endpoint creates no database records. Preview dates and counts can change if
 POST /api/savings-boxes
 Auth: parent
 Body: name, duration_months, max_per_cycle, benefit_percent, allow_early_withdrawal, audience, member_user_ids[]
-Body types: `name:string`, `duration_months:integer` included in the current `savings_box.months_available` configuration (default `[1,2,3]`), `max_per_cycle:string` normal money format and greater than zero, `benefit_percent:number` 0..1000, `allow_early_withdrawal:boolean`, `audience:all|specific`, `member_user_ids:integer[]` required and non-empty for `specific`.
+Body types: `name:string` requerido (max 120), `duration_months:integer` incluido en la configuración actual `savings_box.months_available` (default `[1,2,3]`), `max_per_cycle:string` en formato monetario normal y mayor que cero, `benefit_percent:numeric` 0..1000 (se redondea a dos decimales), `allow_early_withdrawal:boolean`, `audience:all|specific`, `member_user_ids:integer[]` requerido y no vacío para `specific`; los IDs deben pertenecer a la familia. La familia debe tener al menos un integrante.
 Success `201`: `{ "message": "string", "savings_box": "SavingsBox" }`.
 The client does not send a start date, cutoff date, cycle count or total maximum. At creation, the API reads the current configured `days_per_cycle` (default `14`), sets `starts_at`, calculates `cutoff_at` by adding the selected calendar months without overflow, rounds the real duration up to complete cycles, derives `max_amount_cents`, and persists every value as an immutable plan snapshot. Later configuration changes affect only newly created boxes.
 
@@ -527,282 +546,294 @@ Settlement is transactional and idempotent: calling the service again does not p
 
 Loans
 
-Contrato de importes - obligatorio
-- Los campos monetarios directos del objeto `loan` son pesos mexicanos, no centavos:
-  `amount`, `total_amount`, `installment_amount` y `fixed_interest_amount` son `integer`.
-  Ejemplo: `amount: 100` significa `$100.00 MXN`; no dividir entre 100.
-- El objeto `loan` NO devuelve `amount_cents`, `total_amount_cents` ni `installment_amount_cents` en la raiz.
-- Los campos monetarios de pagos, `payment_summary`, `installment_plan` y saldos que terminan en `_cents` son centavos (`integer`).
-- Los campos que terminan en `_display` son textos listos para mostrar, por ejemplo `"$100.00"`.
-- `remaining_balance` en las respuestas de crear oferta y aprobar es un saldo usado/comprometido en centavos (`integer`), aunque el nombre diga "remaining". Su texto equivalente es `remaining_balance_display`.
+Contrato comun de prestamos
+- Todas las rutas de esta seccion requieren `Authorization: Bearer <Sanctum token>` y estan bajo `auth:sanctum`. La identidad y el rol se obtienen del usuario autenticado, nunca de un `user_id` enviado en el body.
+- Roles admitidos: `parent`, `child` y `member`. `child` y `member` usan las acciones del hijo. El padre solo puede actuar sobre prestamos cuyo `parent_user_id` sea su propio ID; el hijo solo sobre prestamos cuyo `child_user_id` sea su propio ID.
+- Los importes de la raiz `loan` son cadenas decimales MXN de dos posiciones. Ejemplo: `"1800.50"` significa `$1,800.50`; no son centavos ni enteros. Los valores `*_cents` son enteros en centavos; `*_display` son cadenas formateadas.
+- La API acepta importes numéricos con 0 a 2 decimales y máximo `999999999999.99`; el monto debe ser mayor que cero. Puede enviarse como número JSON o cadena numérica decimal. La base de datos los persiste con escala de 2.
+- En préstamos, el decimal de entrada usa solo punto (`^\d+(?:\.\d{1,2})?$`); la coma aceptada por otros módulos no pasa la validación de estas rutas. No se admiten signos ni separadores de miles.
+- Las fechas de columnas `date` del objeto `loan` se serializan por Laravel como strings de fecha/fecha-hora; `PaymentSummaryItem.due_date` y los pagos serializados dentro de `payment_summary` usan `YYYY-MM-DD`. Los timestamps son ISO-8601.
+- No existe estado `cancelled`: los estados persistidos son `pending`, `offered`, `approved`, `rejected` y `paid`.
+- Todos los movimientos de desembolso, crédito, reserva, liberación y cuotas son simulados en MXN y se aplican en transacciones. La reserva y el desembolso no se duplican al repetir acciones compatibles con idempotencia. El calendario solo se crea al desembolsar al hijo.
+- El interés porcentual conserva la fórmula actual: `annual_interest_rate` se aplica una sola vez al principal, sin multiplicar ni prorratear por meses. Las cuotas distribuyen centavos enteros; cualquier residuo de la división se asigna a las primeras cuotas.
 
-Diagnostico del caso que muestra `$0.00`
-- La ruta correcta del importe solicitado es `response.loans[i].amount` en los GET, o `response.loan.amount` en los POST.
-- Para un prestamo de $100, la API debe entregar `loan.amount: 100`, `loan.total_amount: 100` o el total calculado, nunca `0`.
-- No leer `loan.amount_cents`, `loan.total_amount_cents`, `loan.data.amount` ni `loan.payment_summary.amount`: esas rutas no existen para el importe principal y un valor ausente no debe convertirse silenciosamente en cero.
-- La web confirma el contrato actual porque renderiza `loan.amount` y `loan.total_amount` directamente.
-
-Objeto `loan` - forma completa
-```json
-{
-  "id": "integer",
-  "parent_user_id": "integer",
-  "child_user_id": "integer",
-  "amount": "integer (pesos MXN; 100 = $100.00)",
-  "reason": "string|null",
-  "due_date": "string (fecha YYYY-MM-DD o fecha serializada por Laravel)",
-  "installments_count": "integer",
-  "installment_frequency": "weekly|biweekly|monthly",
-  "has_interest": "boolean",
-  "interest_mode": "percent|fixed",
-  "annual_interest_rate": "number",
-  "fixed_interest_amount": "integer (pesos MXN)",
-  "status": "offered|pending|approved|rejected|paid",
-  "rejection_reason": "string|null",
-  "responded_at": "string|null",
-  "requested_by_user_id": "integer|null",
-  "total_amount": "integer (pesos MXN)",
-  "installment_amount": "integer (pesos MXN)",
-  "created_at": "string",
-  "updated_at": "string",
-  "installment_plan": "InstallmentPlan",
-  "payment_summary": "PaymentSummary",
-  "payments": "LoanPayment[] cuando el endpoint carga la relacion; puede no venir en respuestas de creacion/aprobacion",
-  "child": "UserChild|null; se incluye en respuestas para el padre",
-  "parent": "UserParent|null; se incluye en respuestas para el hijo/miembro"
-}
-```
-
-Relaciones anidadas: `child` y `parent` usan los tipos compartidos `UserChild` y `UserParent`. Si una relacion no fue cargada por ese endpoint, la clave puede estar ausente; no debe tratarse como un importe cero.
-
-`InstallmentPlan`
-```json
-{
-  "total_cents": "integer",
-  "total_display": "string",
-  "installments_count": "integer",
-  "groups": [
-    {
-      "count": "integer",
-      "amount_cents": "integer",
-      "amount": "number (pesos MXN)",
-      "amount_display": "string"
-    }
-  ],
-  "summary": "string"
-}
-```
-
-`PaymentSummary`
-```json
-{
-  "total_installments": "integer",
-  "paid_installments": "integer",
-  "pending_installments": "integer",
-  "overdue_installments": "integer",
-  "remaining_installments": "integer",
-  "paid_total_cents": "integer",
-  "paid_principal_cents": "integer",
-  "paid_interest_cents": "integer",
-  "overdue_total_cents": "integer",
-  "overdue_principal_cents": "integer",
-  "overdue_interest_cents": "integer",
-  "remaining_total_cents": "integer",
-  "remaining_principal_cents": "integer",
-  "remaining_interest_cents": "integer",
-  "payable_total_cents": "integer",
-  "payable_principal_cents": "integer",
-  "payable_interest_cents": "integer",
-  "payable_payments": "PaymentSummaryItem[]",
-  "next_payment": "PaymentSummaryItem|null",
-  "next_upcoming_payment": "PaymentSummaryItem|null",
-  "is_fully_paid": "boolean"
-}
-```
-
-`PaymentSummaryItem`
-```json
-{
-  "id": "integer",
-  "installment_number": "integer",
-  "due_date": "string|null",
-  "status": "string",
-  "status_label": "string",
-  "is_payable_today": "boolean",
-  "total_amount_cents": "integer",
-  "principal_amount_cents": "integer",
-  "interest_amount_cents": "integer",
-  "total_amount": "number (pesos MXN)",
-  "principal_amount": "number (pesos MXN)",
-  "interest_amount": "number (pesos MXN)",
-  "total_amount_display": "string",
-  "principal_amount_display": "string",
-  "interest_amount_display": "string",
-  "paid_at": "string|null"
-}
-```
-
-`LoanPayment` cuando viene en `loan.payments` o como `payment` de pago
-```json
-{
-  "id": "integer",
-  "loan_id": "integer",
-  "installment_number": "integer",
-  "due_date": "string",
-  "status": "string",
-  "total_amount_cents": "integer",
-  "principal_amount_cents": "integer",
-  "interest_amount_cents": "integer",
-  "paid_at": "string|null",
-  "created_at": "string",
-  "updated_at": "string",
-  "total_amount": "number (pesos MXN)",
-  "principal_amount": "number (pesos MXN)",
-  "interest_amount": "number (pesos MXN)",
-  "total_amount_display": "string",
-  "principal_amount_display": "string",
-  "interest_amount_display": "string",
-  "status_label": "string",
-  "is_payable_today": "boolean"
-}
-```
-
-GET /api/loans
-Auth: family user
-Returns:
-```json
-{
-  "loans": "Loan[]"
-}
-```
-Para padre, cada `loan` incluye `child`; para child/member incluye `parent`.
-Esta respuesta incluye `payments`, `installment_plan` y `payment_summary`.
-
-Relaciones por accion:
-- `GET /api/loans` y `GET /api/loans/waiting`: padre -> `child`; child/member -> `parent`; incluye `payments`.
-- `POST /api/loans`: incluye `child`; la respuesta de creacion no garantiza `payments` como relacion serializada, pero siempre incluye `payment_summary`.
-- `POST /api/loans/{loan}/approve`: incluye `child`; la respuesta no garantiza `payments` como relacion serializada.
-- `POST /api/loans/{loan}/respond`: incluye `parent`, `child` y `payments`.
-- `POST /api/loan-payments/{loanPayment}/pay`: incluye `parent`, `child` y `payments`.
-
-GET /api/loans/waiting
-Auth: family user
-Returns: `{ "loans": "Loan[]" }` con la misma forma de `GET /api/loans`.
-Filtra solamente `status: "pending"`.
-
-GET /api/loans/active-total
-Auth: parent
-Returns:
-```json
-{
-  "total_active_loans": "integer",
-  "estimated_total_paid": "number (pesos MXN)",
-  "estimated_total_paid_cents": "integer",
-  "estimated_total_paid_display": "string",
-  "interest_generated_this_month": "number (pesos MXN)",
-  "interest_generated_this_month_cents": "integer",
-  "interest_generated_this_month_display": "string",
-  "interest_generated_historical": "number (pesos MXN)",
-  "interest_generated_historical_cents": "integer",
-  "interest_generated_historical_display": "string",
-  "currency": "string (MXN)",
-  "meta": {
-    "is_estimated": "boolean",
-    "estimation_note": "string",
-    "interest_source": "string",
-    "interest_period": { "from": "string", "to": "string" }
-  }
-}
-```
+- No hay expiracion automatica de solicitudes ni ofertas. Mientras `status = offered`, el tiempo de espera no aumenta `total_amount`, no genera interes adicional y no crea cuotas; el interes se calcula una sola vez al guardar las condiciones.
+- Estas operaciones no validan un saldo disponible ni un tope del padre. `remaining_balance` es el contador simulado de dinero usado/comprometido en centavos; una reserva aumenta el contador y un reembolso lo reduce. No representa dinero real disponible.
+- Al pagar una cuota, el campo de respuesta `parent_balance_cents` informa el saldo simulado almacenado tras recibir ese pago. No es equivalente al `balance_cents` de la relacion `parent`, que para un padre es el contador de uso.
 
 POST /api/loans
-Auth: parent or child/member
-Body: child_user_id, amount, reason, due_date, installments_count, installment_frequency, has_interest, interest_mode, annual_interest_rate, fixed_interest_amount
-Body types: `child_user_id: integer`, `amount: integer (pesos MXN, min 1)`, `reason: string|null`, `due_date: date`, `installments_count: integer`, `installment_frequency: weekly|biweekly|monthly`, `has_interest: boolean`, `interest_mode: percent|fixed`, `annual_interest_rate: number`, `fixed_interest_amount: integer`.
-Returns for child/member request (`201`):
-```json
-{ "message": "string", "loan": "Loan" }
+Auth: parent, child o member. La forma del body y la acción dependen del rol autenticado, como se describe a continuación.
+
+Entrada inicial del hijo
+- `POST /api/loans` distingue el flujo por `role` autenticado. Para `child` o `member`, el body admite exactamente `amount`, `reason` y `months`. Cualquier otra clave, incluida `child_user_id`, devuelve `422`.
+- `amount`: requerido; numérico, > 0, máximo 2 decimales y máximo `999999999999.99`.
+- `reason`: requerido; string de máximo 120 caracteres; no puede quedar vacío al recortarlo; rechaza etiquetas HTML (cuando `strip_tags` altera el texto) y caracteres de control. Se guarda recortado. Las comillas y otros caracteres ordinarios se guardan como texto y no se ejecutan como SQL.
+- `months`: requerido; entero dentro de la lista permitida exacta `1`, `3`, `6`, `12`. Los meses representan cuotas mensuales.
+- Validación adicional: el total debe alcanzar al menos un centavo por cuota; si `amount` en centavos es menor que `months`, responde `422`.
+- El padre asociado se deriva de la relación familiar de la cuenta autenticada. Si no existe, responde `422`.
+- Condiciones calculadas y guardadas por servidor: `installments_count = months`, `installment_frequency = monthly`, `has_interest = false`, `interest_mode = percent`, `annual_interest_rate = 0`, `fixed_interest_amount = "0.00"`, `total_amount = amount`, y `installment_amount` se calcula en centavos como el importe por cuota redondeado hacia arriba. `due_date` e `initial_due_date` se calculan a un mes calendario desde la fecha de solicitud, sin desbordar el último día del mes.
+- Se guardan los tres datos originales en `requested_amount`, `requested_reason`, `requested_months`, además de las condiciones iniciales derivadas `initial_*`. No se crea una fila `loan_payments` ni se acredita saldo al enviar esta solicitud. Estado inicial: `pending`.
+- Éxito `201`: `{ "message": string, "loan": Loan }`. No se serializa necesariamente la relación `payments` en esta respuesta de creación; `payment_summary` existe y tiene cero cuotas.
+- Repetir este `POST` crea otra solicitud: no acepta clave de idempotencia.
+
+Oferta iniciada por el padre
+- `POST /api/loans` conserva el endpoint y sus campos. Para `parent`, el body validado es:
+
+```text
+child_user_id: integer, requerido; debe existir como users.id y pertenecer a la familia del padre con rol child o member
+amount: número o string numérica decimal, requerido; > 0; 0–2 decimales; máximo 999999999999.99
+reason: string|null, opcional; máximo 120 caracteres
+due_date: fecha requerida, hoy o fecha futura
+installments_count: integer requerido, entre 1 y 120
+installment_frequency: weekly | biweekly | monthly, requerido
+has_interest: boolean requerido
+interest_mode: percent | fixed, requerido
+annual_interest_rate: número requerido, entre 0 y 100, máximo 2 decimales
+fixed_interest_amount: número/string decimal requerido, entre 0 y 999999999999.99, máximo 2 decimales
 ```
-The loan status is `pending`.
-Returns for parent offer (`201`):
-```json
-{
-  "message": "string",
-  "loan": "Loan",
-  "remaining_balance": "integer (centavos comprometidos/usados)",
-  "remaining_balance_display": "string"
+
+- Todos los campos indicados son requeridos salvo `reason`. Para ausencia de interés, el padre debe enviar `has_interest: false`, `annual_interest_rate: 0` y `fixed_interest_amount: 0`; la API normaliza `interest_mode` a `percent`. Con interés porcentual: tasa > 0 y monto fijo = 0. Con interés fijo: monto fijo > 0 y tasa = 0. Las combinaciones incoherentes devuelven `422` con mensaje y `errors.interest_mode`.
+- El total calculado no puede superar `999999999999.99` ni ser menor que el número de cuotas en centavos; si no puede producir cuotas de al menos un centavo, devuelve `422`.
+- Las claves no reconocidas no forman parte del contrato validado y se ignoran en esta ruta; no reemplazan valores validados.
+- Se crea una oferta `offered`, con `requested_by_user_id` igual al padre y sin snapshots `requested_*` / `initial_*` del flujo del hijo. Se registra una reserva simulada del principal en el contador de dinero usado del padre. No se acredita al hijo ni se crea el calendario hasta que el hijo acepte.
+- Éxito `201`: `{ "message": string, "loan": Loan, "remaining_balance": integer, "remaining_balance_display": string }`. Aquí `remaining_balance` es el total simulado usado/comprometido por el padre en centavos, pese al nombre; incluye la nueva reserva.
+
+Objeto `Loan`
+- La forma de las claves persistidas y calculadas es la siguiente. `installment_plan` y `payment_summary` son atributos añadidos por la API; `payments`, `child` y `parent` son relaciones y aparecen solo cuando el endpoint indicado las carga.
+
+```text
+Loan = {
+  id: integer,
+  parent_user_id: integer,
+  child_user_id: integer,
+  amount: string (decimal MXN, 2 posiciones),
+  reason: string|null,
+  due_date: string (fecha serializada por Laravel),
+  installments_count: integer,
+  installment_frequency: weekly|biweekly|monthly,
+  has_interest: boolean,
+  interest_mode: percent|fixed,
+  annual_interest_rate: number,
+  fixed_interest_amount: string (decimal MXN, 2 posiciones),
+  status: pending|offered|approved|rejected|paid,
+  rejection_reason: string|null,
+  responded_at: ISODateTime,
+  requested_by_user_id: integer|null,
+  total_amount: string (decimal MXN, 2 posiciones),
+  installment_amount: string (decimal MXN, 2 posiciones),
+  requested_amount: string|null (decimal MXN, 2 posiciones),
+  requested_reason: string|null,
+  requested_months: integer|null,
+  initial_due_date: string|null (fecha serializada por Laravel),
+  initial_installments_count: integer|null,
+  initial_installment_frequency: string|null,
+  initial_has_interest: boolean|null,
+  initial_interest_mode: string|null,
+  initial_annual_interest_rate: number|null,
+  initial_fixed_interest_amount: string|null (decimal MXN, 2 posiciones),
+  initial_total_amount: string|null (decimal MXN, 2 posiciones),
+  initial_installment_amount: string|null (decimal MXN, 2 posiciones),
+  proposed_due_date: string|null (fecha serializada por Laravel),
+  parent_reviewed_at: ISODateTime,
+  reserved_amount_cents: integer|null,
+  funds_reserved_at: ISODateTime,
+  funds_released_at: ISODateTime,
+  funds_disbursed_at: ISODateTime,
+  created_at: ISODateTime,
+  updated_at: ISODateTime,
+  installment_plan: InstallmentPlan|null,
+  payment_summary: PaymentSummary,
+  payments: LoanPayment[] (solo si el endpoint carga la relación),
+  child: UserChild|null (solo si el endpoint carga la relación),
+  parent: UserParent|null (solo si el endpoint carga la relación)
 }
 ```
-The loan status is `offered`.
 
-POST /api/loans/{loan}/approve
-Auth: parent
-Returns (`200`):
-```json
-{
-  "message": "string",
-  "loan": "Loan",
-  "remaining_balance": "integer (centavos comprometidos/usados)",
-  "remaining_balance_display": "string",
-  "child_balance_cents": "integer",
-  "child_balance_display": "string"
+- `installment_plan` es `null` hasta `approved`/`paid`; en préstamos desembolsados:
+
+```text
+InstallmentPlan = {
+  total_cents: integer,
+  total_display: string,
+  installments_count: integer,
+  groups: [{ count: integer, amount_cents: integer, amount: number (MXN), amount_display: string }],
+  summary: string
 }
 ```
-The returned loan status is `approved`.
 
-POST /api/loans/{loan}/respond
-Auth: child/member
-Body: action accept/reject, reason required when reject
-Body types: `action: accept|reject`, `reason: string|null` (required and non-empty for `reject`).
-Returns (`200`):
-```json
-{
-  "message": "string",
-  "loan": "Loan",
-  "member_balance_cents": "integer",
-  "member_balance_display": "string"
+- `payment_summary` siempre se agrega. Antes del desembolso contiene conteos y sumas en cero, arreglos vacíos, `next_payment: null`, `next_upcoming_payment: null` e `is_fully_paid: false`.
+
+```text
+PaymentSummary = {
+  total_installments: integer,
+  paid_installments: integer,
+  pending_installments: integer,
+  overdue_installments: integer,
+  remaining_installments: integer,
+  paid_total_cents: integer,
+  paid_principal_cents: integer,
+  paid_interest_cents: integer,
+  overdue_total_cents: integer,
+  overdue_principal_cents: integer,
+  overdue_interest_cents: integer,
+  remaining_total_cents: integer,
+  remaining_principal_cents: integer,
+  remaining_interest_cents: integer,
+  payable_total_cents: integer,
+  payable_principal_cents: integer,
+  payable_interest_cents: integer,
+  payable_payments: PaymentSummaryItem[],
+  next_payment: PaymentSummaryItem|null,
+  next_upcoming_payment: PaymentSummaryItem|null,
+  is_fully_paid: boolean
 }
 ```
-For `accept`, the returned loan status is `approved`; for `reject`, it is `rejected`.
 
-POST /api/loan-payments/{loanPayment}/pay
-Auth: child/member
-Returns (`200`):
-```json
+```text
+PaymentSummaryItem = {
+  id: integer,
+  installment_number: integer,
+  due_date: string|null (YYYY-MM-DD),
+  status: pending|overdue|paid,
+  status_label: string (Pendiente|Vencido|Pagado),
+  is_payable_today: boolean,
+  total_amount_cents: integer,
+  principal_amount_cents: integer,
+  interest_amount_cents: integer,
+  total_amount: number (MXN),
+  principal_amount: number (MXN),
+  interest_amount: number (MXN),
+  total_amount_display: string,
+  principal_amount_display: string,
+  interest_amount_display: string,
+  paid_at: ISODateTime
+}
+```
+
+- Un `LoanPayment` serializado como relación o como `payment` usa `due_date: string` (fecha serializada por Laravel), `total_amount_cents`, `principal_amount_cents`, `interest_amount_cents: integer`; `total_amount`, `principal_amount`, `interest_amount: number` en MXN; los tres `*_display: string`; además `id`, `loan_id`, `installment_number: integer`, `status: pending|overdue|paid`, `paid_at: ISODateTime`, `created_at`, `updated_at: ISODateTime`, `status_label: string` e `is_payable_today: boolean`.
+- En las relaciones, `child` usa `UserChild` y `parent` usa `UserParent`. La API carga estas relaciones según el endpoint indicado abajo.
+
+Relaciones serializadas por endpoint:
+- `GET /api/loans` y `GET /api/loans/waiting`: `child` para parent; `parent` para child/member; siempre cargan `payments`.
+- `POST /api/loans`: carga `child`; no serializa la relacion `payments`.
+- `POST /api/loans/{loan}/approve`, `/review`, `/reject` y `/respond`: cargan `parent`, `child` y `payments`.
+- `POST /api/loan-payments/{loanPayment}/pay`: `loan` carga `parent`, `child` y `payments`; el objeto raiz `payment` no carga una relacion `loan`.
+GET /api/loans
+Auth: parent, child o member.
+Filtro: el padre recibe préstamos con su `parent_user_id`; el hijo/miembro recibe préstamos con su `child_user_id`.
+Éxito `200`: `{ "loans": Loan[] }`. Incluye `payments`; incluye `child` para el padre e `parent` para hijo/miembro. `payment_summary` e `installment_plan` siguen las reglas anteriores.
+
+GET /api/loans/waiting
+Auth: parent, child o member.
+Filtro del padre: préstamos propios en estado `pending`. Filtro de hijo/miembro: préstamos propios en estado `pending` o `offered`.
+Éxito `200`: `{ "loans": Loan[] }`, con las mismas relaciones cargadas que `GET /api/loans`. En solicitudes/propuestas aún no desembolsadas, `payments` es `[]`.
+
+- No existe un GET individual por ID: el hijo obtiene la propuesta desde `GET /api/loans/waiting` o `GET /api/loans`.
+- Mientras `status = offered`, `due_date` en la respuesta es el vencimiento efectivo proyectado si el hijo acepta en ese momento; `proposed_due_date` conserva la fecha enviada por el padre.
+GET /api/loans/active-total
+Auth: parent. Otros roles reciben `403`.
+Filtro: préstamos del padre con estado `approved` o `paid`. Los totales pagados e intereses se calculan desde cuotas con estado `paid`.
+Éxito `200`:
+
+```text
 {
-  "message": "string",
-  "payment": "LoanPayment",
-  "loan": "Loan",
-  "member_balance_cents": "integer",
-  "member_balance_display": "string",
-  "new_balance_cents": "integer",
-  "new_balance_display": "string",
-  "parent_balance_cents": "integer",
-  "parent_balance_display": "string",
-  "unlocked_badges": [
-    {
-      "id": "integer",
-      "slug": "string",
-      "title": "string",
-      "description": "string|null",
-      "text": "string",
-      "image_url": "string|null",
-      "points_reward": "integer"
-    }
-  ],
-  "domus_points": {
-    "points": {
-      "historical": "integer",
-      "earned": "integer",
-      "spent": "integer",
-      "available": "integer"
-    },
-    "level": "DomusLevel|null"
+  total_active_loans: integer,
+  estimated_total_paid: number (MXN),
+  estimated_total_paid_cents: integer,
+  estimated_total_paid_display: string,
+  interest_generated_this_month: number (MXN),
+  interest_generated_this_month_cents: integer,
+  interest_generated_this_month_display: string,
+  interest_generated_historical: number (MXN),
+  interest_generated_historical_cents: integer,
+  interest_generated_historical_display: string,
+  currency: "MXN",
+  meta: {
+    is_estimated: false,
+    estimation_note: string,
+    interest_source: "paid loan payments only",
+    interest_period: { from: string (YYYY-MM-DD), to: string (YYYY-MM-DD) }
   }
 }
 ```
 
-`DomusLevel` = `{ "id": "integer", "level_number": "integer", "name": "string", "min_points": "integer", "max_points": "integer", "definition": "string|null" }`.
+POST /api/loans/{loan}/approve
+Auth: parent propietario de la solicitud `pending` del hijo.
+Body: vacío. Cualquier campo enviado devuelve `422`; para proponer condiciones distintas debe usarse `/review`.
+Acción: aprueba exactamente las condiciones iniciales; en una transacción registra el débito simulado del padre, acredita el principal al hijo, marca `approved` y crea el calendario de cuotas. El primer vencimiento es un mes calendario después de la fecha de aprobación.
+Éxito `200`: `{ "message": string, "loan": Loan, "remaining_balance": integer (centavos simulados usados/comprometidos por el padre), "remaining_balance_display": string, "child_balance_cents": integer, "child_balance_display": string }`.
+Reintento: si el mismo préstamo ya está `approved`/`paid` y `funds_disbursed_at` existe, devuelve el estado financiero actual sin volver a acreditar ni recrear cuotas. Otro estado devuelve `422`; préstamo ajeno devuelve `403`.
+
+POST /api/loans/{loan}/review
+Auth: parent propietario de la solicitud del hijo.
+Body: conjunto completo requerido de condiciones finales; no acepta claves adicionales:
+
+```text
+amount: número/string decimal MXN, > 0, 0–2 decimales, máximo 999999999999.99
+due_date: fecha requerida, hoy o futura
+installments_count: integer requerido, 1–120
+installment_frequency: weekly | biweekly | monthly, requerido
+has_interest: boolean requerido
+interest_mode: percent | fixed, requerido
+annual_interest_rate: número requerido, 0–100, máximo 2 decimales
+fixed_interest_amount: número/string decimal requerido, 0–2 decimales, 0–999999999999.99
+```
+
+Las reglas de coherencia de interés y máximo del total son las mismas que en la oferta iniciada por el padre.
+- Si el préstamo sigue `pending` y todas las condiciones coinciden con la solicitud tal como está (incluida la fecha inicial), se acepta directamente: desembolsa y genera el calendario en ese momento; respuesta de aprobación `200` como `/approve`.
+- Si las condiciones difieren, se guardan como condiciones actuales completas, se preserva `requested_*`/`initial_*`, se escribe `proposed_due_date` y `parent_reviewed_at`, el estado pasa a `offered` y se reserva el principal simulado. No se acredita al hijo ni se crean cuotas aún. El hijo confirma o rechaza en `/respond`.
+- Si cambia solo interés/plazo/frecuencia pero conserva la fecha inicial, el vencimiento efectivo se calcula desde la aceptación del hijo según frecuencia (7 días, 14 días o un mes calendario). Si el padre propuso otra fecha, la espera transcurrida desde la revisión se suma a esa fecha cuando se prepara el desembolso.
+- Éxito `200` al proponer: `{ "message": string, "loan": Loan, "remaining_balance": integer (centavos usados/comprometidos), "remaining_balance_display": string }`. La relación `payments` se incluye como arreglo vacío. Repetir los mismos términos para una propuesta ya `offered` devuelve la propuesta existente sin otra reserva. Repetirlos después de desembolsar devuelve la respuesta de aprobación sin duplicar movimientos.
+- Solo admite solicitudes `pending`, salvo los reintentos idénticos descritos. Otro estado o condiciones no idénticas en un reintento devuelven `422`; préstamo ajeno devuelve `403`.
+
+POST /api/loans/{loan}/reject
+Auth: parent propietario de solicitud del hijo en estado `pending`.
+Body: `{ "reason": string|null }`; `reason` es opcional/null, máximo 255 caracteres. Claves distintas de `reason` devuelven `422`.
+Acción: cambia estado a `rejected`, registra `parent_reviewed_at`, `responded_at` y el motivo recortado. Al rechazar una solicitud `pending` no hay reserva, transferencia, cambio de saldos ni reembolso.
+Éxito `200`: `{ "message": string, "loan": Loan }`.
+Reintento: si ya está `rejected` sin reserva, devuelve éxito sin repetir efectos. Otros estados devuelven `422`; préstamo ajeno devuelve `403`.
+
+POST /api/loans/{loan}/respond
+Auth: child o member propietario del préstamo `offered`.
+Body exacto, sin claves adicionales:
+
+```text
+action: "accept" | "reject", requerido
+reason: string|null, opcional, máximo 255 caracteres; para reject debe quedar no vacío después de recortar
+```
+
+`accept`: confirma íntegramente las condiciones guardadas, sin posibilidad de cambiarlas. En una transacción valida la reserva, acredita el principal al hijo, actualiza `due_date`/`funds_disbursed_at`/`responded_at`, cambia a `approved` y crea todas las cuotas. Primera cuota: fecha efectiva acordada según la regla de `/review`; el reloj de pago no empieza antes de la confirmación/desembolso.
+`reject`: cambia a `rejected`, guarda motivo y `responded_at`, y libera la reserva del padre una sola vez. No acredita dinero al hijo ni crea cuotas.
+Éxito `200` para ambas acciones: `{ "message": string, "loan": Loan, "member_balance_cents": integer, "member_balance_display": string, "remaining_balance": integer (centavos simulados usados/comprometidos por el padre), "remaining_balance_display": string }`.
+Reintento: aceptar un préstamo ya `approved`/`paid` con desembolso registrado, o repetir rechazo de uno `rejected` con `funds_released_at`, devuelve el estado sin duplicar el abono, calendario o reembolso. Un estado distinto de `offered` devuelve `422`; préstamo ajeno devuelve `403`.
+
+POST /api/loan-payments/{loanPayment}/pay
+Auth: child o member propietario del préstamo activo `approved`.
+Body: no se requieren campos; el endpoint no lee el body.
+Condiciones: la cuota debe estar vencida hoy o antes, no estar pagada y el saldo del hijo debe cubrirla. En una transacción debita el saldo del hijo, acredita la cuenta simulada del padre, marca la cuota como pagada y actualiza el estado agregado del préstamo. No produce movimientos duplicados: el reintento de una cuota ya pagada responde `422`.
+Éxito `200`:
+
+```text
+{
+  message: string,
+  payment: LoanPayment,
+  loan: Loan,
+  member_balance_cents: integer,
+  member_balance_display: string,
+  new_balance_cents: integer (alias de member_balance_cents),
+  new_balance_display: string (alias de member_balance_display),
+  parent_balance_cents: integer (saldo simulado almacenado tras recibir el pago; no es el contador de uso del padre),
+  parent_balance_display: string,
+  unlocked_badges: [{ id: integer, slug: string, title: string, description: string|null, text: string, image_url: string|null, points_reward: integer }],
+  domus_points: { points: { historical: integer, earned: integer, spent: integer, available: integer }, level: DomusLevel|null }
+}
+```
+
+Errores comunes de las rutas de préstamos
+- `401`: token ausente/inválido o contexto autenticado ausente.
+- `403`: rol no autorizado o el préstamo/cuota no pertenece al usuario autenticado.
+- `404`: ID de `loan` o `loanPayment` inexistente (route model binding).
+- `422`: validación fallida, campo adicional prohibido en cuerpos estrictos, estado incompatible, reserva inconsistente, fecha aún no vencida o saldo insuficiente. La respuesta de validación Laravel usa `{ "message": string, "errors": { "campo": [string] } }`; algunos errores de estado devuelven solo `message`.
 
 Education
 GET /api/education/categories
@@ -816,7 +847,7 @@ Success `200`:
   ]
 }
 ```
-Only active categories and courses are returned.
+Solo se listan categorías activas. `courses_count` cuenta cursos activos; `max_domus_points` suma `excellent_points` de reglas de examen de todos los cursos de esas categorías, incluso cursos inactivos (la consulta de ese total no filtra `courses.is_active`).
 
 GET /api/education/categories/{category}/courses
 Auth: bearer token
@@ -842,11 +873,12 @@ Success `200`:
 ```
 `ExamSummary` = `{ approved_percentage: integer, excellent_percentage: integer, approved_points: integer, excellent_points: integer, has_approved_reward: boolean, has_excellent_reward: boolean, awarded_points_total: integer, approved_awarded_points: integer, excellent_awarded_points: integer, approved_awarded_at: string|null, excellent_awarded_at: string|null, message: string, last_result: AssessmentResult|null }`.
 `AssessmentResult` = `{ score: integer, total_questions: integer, percentage: number, submitted_at: string }`.
+Si hay varias partes de tipo examen en un curso, `exam_summary` corresponde a la que tiene el menor `lesson_parts.id` entre las partes cargadas.
 
 GET /api/education/courses/{course}
 Auth: bearer token
 Path `course`: integer course ID. Inactive course/category returns `404`.
-Optional query `lesson_id:integer` selects a lesson; otherwise the next incomplete lesson is selected.
+Query opcional `lesson_id:integer`: si coincide con una lección de este curso, esa lección se devuelve como `current_lesson`, esté completada o no. Si se omite, es inválido o pertenece a otro curso, se elige la primera lección cuando aún no hay ninguna completada; de lo contrario, la primera cuya `position` sea mayor que la posición máxima completada, o la última si no hay una posterior. Sin lecciones, `current_lesson` es null. El endpoint de completar permite marcar cualquier lección del curso activo, sin exigir orden.
 Success `200`:
 ```json
 {
@@ -878,7 +910,7 @@ Success `200`:
 POST /api/education/lesson-parts/{lessonPart}/submit
 Auth: bearer token
 Path `lessonPart`: integer part ID in an active course/category. Only `quiz` and `exam` accept answers.
-Body: `answers:array` with at least one `{ question_uuid:string, answer:a|b|c|d }`.
+Body: `answers:array` con al menos un `{ question_uuid:string (max 100), answer:a|b|c|d }`.
 Success `200`:
 ```json
 {
@@ -902,14 +934,15 @@ GET /api/parent/tasks
 Auth: parent
 Success `200`:
 ```json
-{ "tasks": ["Task"], "available_balance_cents": "integer (centavos comprometidos/usados)", "available_balance_display": "string" }
+{ "tasks": ["TaskParentListItem"], "available_balance_cents": "integer (centavos comprometidos/usados)", "available_balance_display": "string" }
 ```
-`Task` = `{ id: integer, parent_user_id: integer, accepted_by_user_id: integer|null, completed_by_user_id: integer|null, member_completion_requested_at: string|null, name: string, description: string|null, reward_amount: integer (pesos MXN), reward_points: integer, status: open|accepted|in_progress|awaiting_parent_confirmation|completed|closed|ended|canceled, created_at: string, updated_at: string, accepted_by: User|null, completed_by: User|null }`.
+`Task` = `{ id: integer, parent_user_id: integer, accepted_by_user_id: integer|null, completed_by_user_id: integer|null, member_completion_requested_at: string|null, name: string, description: string|null, reward_amount: integer (pesos MXN), reward_points: integer, status: open|accepted|in_progress|awaiting_parent_confirmation|completed|closed|ended|canceled, created_at: string, updated_at: string }`.
+`TaskParentListItem` = `Task` más `{ accepted_by: TaskActor|null, completed_by: TaskActor|null }`. Solo `GET /api/parent/tasks` carga esas dos relaciones; los demás endpoints de tareas devuelven `Task` sin esas claves, salvo que la respuesta indique expresamente lo contrario.
 
 POST /api/parent/tasks
 Auth: parent
 Body: name, description, reward_amount, reward_points
-Body types: `name:string`, `description:string|null`, `reward_amount:integer` pesos MXN min `0`, `reward_points:integer` `0..100`.
+Body types: `name:string` requerido (max 120), `description:string|null` opcional (max 255), `reward_amount:integer` requerido en pesos MXN (min `0`), `reward_points:integer` requerido (`0..100`).
 Success `201`: `{ "message": "string", "task": "Task", "available_balance_cents": "integer", "available_balance_display": "string" }`.
 
 POST /api/parent/tasks/{task}/review

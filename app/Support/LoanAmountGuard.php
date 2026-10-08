@@ -30,8 +30,8 @@ final class LoanAmountGuard
     public static function assertMatches(array $expected, array $actual, string $stage = 'unknown'): void
     {
         foreach (['amount', 'total_amount', 'installment_amount'] as $field) {
-            $expectedValue = (int) ($expected[$field] ?? 0);
-            $actualValue = (int) ($actual[$field] ?? 0);
+            $expectedValue = BalanceHelper::parseMoneyToCents((string) ($expected[$field] ?? 0));
+            $actualValue = BalanceHelper::parseMoneyToCents((string) ($actual[$field] ?? 0));
 
             if ($expectedValue !== $actualValue) {
                 throw new \LogicException(

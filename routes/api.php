@@ -65,6 +65,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/loans/active-total', [LoanController::class, 'activeTotal']);
     Route::post('/loans', [LoanController::class, 'store']);
     Route::post('/loans/{loan}/approve', [LoanController::class, 'approve']);
+    Route::post('/loans/{loan}/review', [LoanController::class, 'review']);
+    Route::post('/loans/{loan}/reject', [LoanController::class, 'reject']);
     Route::post('/loans/{loan}/respond', [LoanController::class, 'respondToOffer']);
     Route::post('/loan-payments/{loanPayment}/pay', [LoanController::class, 'pay']);
     Route::get('/education/categories', [EducationController::class, 'categories']);
