@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Str;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Jetstream\HasProfilePhoto;
 use Laravel\Sanctum\HasApiTokens;
@@ -62,6 +63,13 @@ class User extends Authenticatable
         'balance_cents',
         'balance_display',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (User $user) {
+            $user->billing_account_id = (string) Str::uuid();
+        });
+    }
 
     /**
      * Get the attributes that should be cast.

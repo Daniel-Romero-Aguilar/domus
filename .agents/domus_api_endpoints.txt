@@ -34,6 +34,7 @@ MoneyDisplay = string
 
 User = {
   id: integer,
+  billing_account_id: string (UUID unico y estable para todos los roles; GET /api/me: user.billing_account_id),
   name: string,
   email: string|null,
   username: string|null,

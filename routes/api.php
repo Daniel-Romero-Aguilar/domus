@@ -81,3 +81,5 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/child/tasks/{task}/accept', [TaskController::class, 'childAccept']);
     Route::post('/tasks/member/completed/{task}', [TaskController::class, 'memberMarkCompleted']);
 });
+
+require __DIR__.'/billing_demo.php';
