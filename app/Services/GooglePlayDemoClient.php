@@ -65,17 +65,22 @@ class GooglePlayDemoClient
 
     private function request(): PendingRequest
     {
-        $json = config('billing_demo.credentials_json');
-        if (! is_string($json) || $json === '') {
-            $path = config('billing_demo.credentials_path');
-            if (! is_string($path) || ! is_readable($path)) {
-                Log::error('Google Play demo credentials missing');
-                abort(503, 'La prueba de compras todavía no está configurada.');
+        $encoded = config('billing_demo.credentials_base64');
+        if (is_string($encoded) && $encoded !== '') {
+            $json = base64_decode($encoded, true);
+        } else {
+            $json = config('billing_demo.credentials_json');
+            if (! is_string($json) || $json === '') {
+                $path = config('billing_demo.credentials_path');
+                if (! is_string($path) || ! is_readable($path)) {
+                    Log::error('Google Play demo credentials missing');
+                    abort(503, 'La prueba de compras todavía no está configurada.');
+                }
+                $json = file_get_contents($path);
             }
-            $json = file_get_contents($path);
         }
 
-        $credentials = json_decode($json, true);
+        $credentials = is_string($json) ? json_decode($json, true) : null;
         if (! (is_array($credentials)
             && ($credentials['type'] ?? null) === 'service_account'
             && ! empty($credentials['private_key'])
