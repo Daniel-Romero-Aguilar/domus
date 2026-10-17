@@ -26,6 +26,23 @@ class BillingDemoController extends Controller
             return $this->response($request);
         }
 
+        if (config('billing_demo.dummy_verification')) {
+            if ($record->google_state !== 'DEMO_CONFIRMED' || $record->expires_at === null) {
+                return $this->response($request);
+            }
+
+            $expiresAt = CarbonImmutable::parse($record->expires_at, 'UTC');
+            return $this->response($request, [
+                'eligible' => $expiresAt->isFuture(),
+                'acknowledged' => true,
+                'expires_at' => $expiresAt,
+            ]);
+        }
+
+        if ($record->google_state === 'DEMO_CONFIRMED') {
+            return $this->response($request);
+        }
+
         $purchase = $this->play->lookup(Crypt::decryptString($record->purchase_token));
         if ($purchase === null) {
             DB::table('billing_demo_subscriptions')->where('id', $record->id)->update([
@@ -60,13 +77,22 @@ class BillingDemoController extends Controller
         $existing = DB::table('billing_demo_subscriptions')->where('purchase_token_hash', $hash)->first();
         abort_if($existing && (string) $existing->user_id !== (string) $userId, 403, 'Esta compra corresponde a otra cuenta de Domus.');
 
-        $purchase = $this->play->lookup($token);
-        abort_if($purchase === null, 422, 'El comprobante de Google Play no es válido o ya venció.');
-        $details = $this->details($request, $purchase);
-        abort_if(in_array($details['state'], [
-            'SUBSCRIPTION_STATE_PENDING',
-            'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
-        ], true), 422, 'La compra aún no está confirmada en Google Play.');
+        if (config('billing_demo.dummy_verification')) {
+            $details = [
+                'eligible' => true,
+                'acknowledged' => true,
+                'state' => 'DEMO_CONFIRMED',
+                'expires_at' => CarbonImmutable::now('UTC')->addMonthNoOverflow(),
+            ];
+        } else {
+            $purchase = $this->play->lookup($token);
+            abort_if($purchase === null, 422, 'El comprobante de Google Play no es válido o ya venció.');
+            $details = $this->details($request, $purchase);
+            abort_if(in_array($details['state'], [
+                'SUBSCRIPTION_STATE_PENDING',
+                'SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED',
+            ], true), 422, 'La compra aún no está confirmada en Google Play.');
+        }
 
         // This table only records the demo. Never update users, roles or access.
         DB::transaction(function () use ($userId, $hash, $token, $details) {
@@ -92,7 +118,7 @@ class BillingDemoController extends Controller
             ]);
         });
 
-        if ($details['eligible'] && ! $details['acknowledged']) {
+        if (! config('billing_demo.dummy_verification') && $details['eligible'] && ! $details['acknowledged']) {
             $this->play->acknowledge($token);
             $details['acknowledged'] = true;
         }
