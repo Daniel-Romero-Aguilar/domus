@@ -30,6 +30,7 @@
 
     <nav class="admin-menu" aria-label="Menu de administracion">
         <a href="{{ route('admin.families.index') }}">Familias</a>
+        <a href="{{ route('admin.subscriptions.index') }}">Suscripciones</a>
         <a href="{{ route('admin.dashboard') }}">Insignias</a>
         <a href="{{ route('admin.landing-emails') }}">Correos de landing</a>
     </nav>

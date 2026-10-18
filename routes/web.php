@@ -4,6 +4,7 @@ use App\Http\Controllers\AdminAuthController;
 use App\Http\Controllers\AdminBadgeController;
 use App\Http\Controllers\AdminFamilyOverviewController;
 use App\Http\Controllers\AdminLandingEmailController;
+use App\Http\Controllers\AdminSubscriptionController;
 use App\Http\Controllers\LandingController;
 use App\Support\AdminAbilities;
 use Illuminate\Support\Facades\Route;
@@ -70,6 +71,9 @@ Route::prefix('admin')->group(function () {
         Route::get('/families', AdminFamilyOverviewController::class)
             ->middleware('can:'.AdminAbilities::VIEW_FAMILY_OVERVIEW)
             ->name('admin.families.index');
+        Route::get('/subscriptions', AdminSubscriptionController::class)
+            ->middleware('can:'.AdminAbilities::VIEW_SUBSCRIPTIONS)
+            ->name('admin.subscriptions.index');
         Route::get('/landing-emails', [AdminLandingEmailController::class, 'index'])->name('admin.landing-emails');
         Route::get('/landing-emails/export', [AdminLandingEmailController::class, 'export'])->name('admin.landing-emails.export');
         Route::post('/badges/{badge}/image', [AdminBadgeController::class, 'updateImage'])->name('admin.badges.image.update');

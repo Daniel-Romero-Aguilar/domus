@@ -29,6 +29,7 @@
         </a>
         <nav class="da-navigation" aria-label="Navegación administrativa">
             <a class="is-active" href="{{ route('admin.families.index') }}">Familias</a>
+            <a href="{{ route('admin.subscriptions.index') }}">Suscripciones</a>
             <a href="{{ route('admin.dashboard') }}">Insignias</a>
             <a href="{{ route('admin.landing-emails') }}">Correos</a>
         </nav>

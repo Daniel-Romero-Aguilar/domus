@@ -47,6 +47,7 @@ class BillingDemoController extends Controller
         if ($purchase === null) {
             DB::table('billing_demo_subscriptions')->where('id', $record->id)->update([
                 'google_state' => 'SUBSCRIPTION_STATE_EXPIRED',
+                'acknowledged' => false,
                 'verified_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -56,6 +57,7 @@ class BillingDemoController extends Controller
         $details = $this->details($request, $purchase);
         DB::table('billing_demo_subscriptions')->where('id', $record->id)->update([
             'google_state' => $details['state'],
+            'acknowledged' => $details['acknowledged'],
             'expires_at' => $details['expires_at']?->toDateTimeString(),
             'verified_at' => now(),
             'updated_at' => now(),
@@ -102,6 +104,7 @@ class BillingDemoController extends Controller
                 'purchase_token' => Crypt::encryptString($token),
                 'product_id' => config('billing_demo.product_id'),
                 'google_state' => $details['state'],
+                'acknowledged' => $details['acknowledged'],
                 'expires_at' => $details['expires_at']?->toDateTimeString(),
                 'verified_at' => now(),
                 'created_at' => now(),
@@ -112,6 +115,7 @@ class BillingDemoController extends Controller
             abort_unless($record && (string) $record->user_id === (string) $userId, 403, 'Esta compra corresponde a otra cuenta de Domus.');
             DB::table('billing_demo_subscriptions')->where('id', $record->id)->update([
                 'google_state' => $details['state'],
+                'acknowledged' => $details['acknowledged'],
                 'expires_at' => $details['expires_at']?->toDateTimeString(),
                 'verified_at' => now(),
                 'updated_at' => now(),
@@ -121,6 +125,11 @@ class BillingDemoController extends Controller
         if (! config('billing_demo.dummy_verification') && $details['eligible'] && ! $details['acknowledged']) {
             $this->play->acknowledge($token);
             $details['acknowledged'] = true;
+            DB::table('billing_demo_subscriptions')->where('purchase_token_hash', $hash)->update([
+                'acknowledged' => true,
+                'verified_at' => now(),
+                'updated_at' => now(),
+            ]);
         }
 
         return $this->response($request, $details);

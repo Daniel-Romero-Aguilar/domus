@@ -26,5 +26,9 @@ class AppServiceProvider extends ServiceProvider
             AdminAbilities::VIEW_FAMILY_OVERVIEW,
             static fn (mixed $actor): bool => $actor instanceof Admin && $actor->exists
         );
+        Gate::define(
+            AdminAbilities::VIEW_SUBSCRIPTIONS,
+            static fn (mixed $actor): bool => $actor instanceof Admin && $actor->exists
+        );
     }
 }
