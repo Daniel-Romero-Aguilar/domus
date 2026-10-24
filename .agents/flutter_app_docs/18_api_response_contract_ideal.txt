@@ -38,6 +38,8 @@ POST /api/login y POST /api/register devuelven token y user.
 Flutter guarda token seguro y luego pide GET /api/me para decidir shell.
 
 GET /api/me devuelve user, parent_admin_name e is_family_member.
+user.premium_expires_at es una fecha ISO-8601 UTC nullable con el ultimo vencimiento conocido de Premium real; conserva fechas pasadas si ya vencio. Sin compra real con fecha conocida es null. Para hijos/integrantes usa la suscripcion del titular de la familia.
+El front puede usar esa fecha para mostrar/ordenar; el permiso de acceso sigue dependiendo de user.is_enabled_functions.
 Flutter usa user.role para abrir ParentShell o ChildShell.
 Si user.balance_display existe, sirve como saldo inicial del hijo/integrante.
 

@@ -158,6 +158,91 @@ class FunctionAccessTest extends TestCase
             ->assertJsonMissingPath('user.current_subscription')->assertJsonMissingPath('user.trial_ends_at');
     }
 
+    public function test_me_returns_null_premium_expiration_without_a_real_purchase(): void
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonStructure(['user' => ['premium_expires_at']])
+            ->assertJsonPath('user.premium_expires_at', null)
+            ->assertJsonPath('user.is_enabled_functions', true);
+
+        $user->created_at = now()->subDays(30);
+        $user->save();
+        $this->subscription($user, 'DEMO_CONFIRMED');
+        $this->actingAs($user->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.premium_expires_at', null)
+            ->assertJsonPath('user.is_enabled_functions', false);
+    }
+
+    public function test_me_keeps_premium_expiration_after_cancellation_and_expiry(): void
+    {
+        $user = User::factory()->create(['created_at' => now()->subDays(30)]);
+        $id = $this->subscription($user, expiresAt: '2026-10-21 12:00:00');
+        $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.premium_expires_at', '2026-10-21T12:00:00+00:00')
+            ->assertJsonPath('user.is_enabled_functions', true);
+
+        DB::table('billing_demo_subscriptions')->where('id', $id)
+            ->update(['google_state' => 'SUBSCRIPTION_STATE_CANCELED']);
+        $this->actingAs($user->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.premium_expires_at', '2026-10-21T12:00:00+00:00')
+            ->assertJsonPath('user.is_enabled_functions', true);
+
+        $this->travel(2)->days();
+        DB::table('billing_demo_subscriptions')->where('id', $id)->update([
+            'google_state' => 'SUBSCRIPTION_STATE_EXPIRED',
+            'acknowledged' => false,
+        ]);
+        $this->actingAs($user->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.premium_expires_at', '2026-10-21T12:00:00+00:00')
+            ->assertJsonPath('user.is_enabled_functions', false)
+            ->assertJsonMissingPath('user.current_subscription')
+            ->assertJsonMissingPath('user.purchase_token');
+    }
+
+    public function test_me_returns_the_latest_known_real_purchase_expiration(): void
+    {
+        $user = User::factory()->create();
+        $first = $this->subscription($user);
+        $this->subscription($user, expiresAt: '2026-12-20 12:00:00');
+        $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.premium_expires_at', '2026-12-20T12:00:00+00:00');
+
+        $this->subscription($user, 'DEMO_CONFIRMED', expiresAt: '2027-01-20 12:00:00');
+        $otherProduct = $this->subscription($user, expiresAt: '2027-02-20 12:00:00');
+        DB::table('billing_demo_subscriptions')->where('id', $otherProduct)
+            ->update(['product_id' => 'other_product']);
+        $unknownExpiration = $this->subscription($user);
+        DB::table('billing_demo_subscriptions')->where('id', $unknownExpiration)
+            ->update(['expires_at' => null]);
+        $this->actingAs($user->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.premium_expires_at', '2026-12-20T12:00:00+00:00');
+
+        DB::table('billing_demo_subscriptions')->where('id', $first)
+            ->update(['verified_at' => now()->addSecond()]);
+        $this->actingAs($user->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.premium_expires_at', '2026-11-20T12:00:00+00:00');
+    }
+
+    public function test_me_uses_the_family_owners_premium_expiration(): void
+    {
+        $parent = User::factory()->create();
+        $this->subscription($parent);
+        foreach (['child', 'member'] as $role) {
+            $user = User::factory()->create(['role' => $role]);
+            FamilyMember::create(['parent_user_id' => $parent->id, 'user_id' => $user->id]);
+            $this->subscription($user, expiresAt: '2026-12-20 12:00:00');
+            $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
+                ->assertJsonPath('user.premium_expires_at', '2026-11-20T12:00:00+00:00');
+        }
+
+        $orphan = User::factory()->create(['role' => 'child']);
+        $this->subscription($orphan);
+        $this->actingAs($orphan, 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonStructure(['user' => ['premium_expires_at']])
+            ->assertJsonPath('user.premium_expires_at', null);
+    }
+
     public function test_expired_access_blocks_reads_and_writes_but_keeps_auth_and_billing_available(): void
     {
         config()->set('billing_demo.enabled', true);
@@ -223,6 +308,8 @@ class FunctionAccessTest extends TestCase
             'product_id' => config('billing_demo.product_id'),
             'purchase_token' => 'premium-token',
         ])->assertOk()->assertJsonPath('data.subscribed', true)->assertJsonPath('data.is_enabled_functions', true);
+        $this->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.premium_expires_at', '2026-11-20T12:00:00+00:00');
         $this->getJson('/api/notifications')->assertOk();
     }
 

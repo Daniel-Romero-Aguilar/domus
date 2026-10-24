@@ -117,7 +117,7 @@ class AuthController extends Controller
         $parentAdminName = $familyRelation?->parent?->name;
 
         return response()->json([
-            'user' => $user->append('is_enabled_functions'),
+            'user' => $user->append(['is_enabled_functions', 'premium_expires_at']),
             'parent_admin_name' => $parentAdminName,
             'is_family_member' => $isFamilyMember,
         ]);

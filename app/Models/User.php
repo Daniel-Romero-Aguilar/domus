@@ -135,6 +135,26 @@ class User extends Authenticatable
         return $this->isEnabledFunctions();
     }
 
+    public function getPremiumExpiresAtAttribute(): ?string
+    {
+        $account = $this->accessAccount();
+        if ($account === null) {
+            return null;
+        }
+
+        // Keep the last known real purchase date, including expired purchases.
+        $subscription = BillingSubscription::query()
+            ->where('user_id', $account->getKey())
+            ->where('product_id', config('billing_demo.product_id'))
+            ->where('google_state', '!=', 'DEMO_CONFIRMED')
+            ->whereNotNull('expires_at')
+            ->orderByDesc('verified_at')
+            ->orderByDesc('id')
+            ->first();
+
+        return $subscription?->expires_at?->toIso8601String();
+    }
+
     public function balance(): HasOne
     {
         return $this->hasOne(Balance::class);
