@@ -38,7 +38,8 @@
 }
 
 .domus-admin button,
-.domus-admin input {
+.domus-admin input,
+.domus-admin select {
     font: inherit;
 }
 
@@ -558,7 +559,8 @@
 }
 
 .da-pagination a,
-.da-pagination > span {
+.da-pagination > span,
+.da-pagination > button {
     padding: .65rem .85rem;
     border: 1px solid var(--da-line);
     border-radius: 12px;
@@ -569,7 +571,8 @@
     text-decoration: none;
 }
 
-.da-pagination a:hover {
+.da-pagination a:hover,
+.da-pagination > button:hover {
     border-color: rgba(45, 91, 255, .28);
     color: var(--da-blue);
 }
@@ -821,7 +824,8 @@
     font-weight: 800;
 }
 
-.da-file-field input {
+.da-file-field input,
+.da-file-field select {
     width: 100%;
     min-width: 0;
     padding: .3rem;
@@ -831,6 +835,10 @@
     color: var(--da-muted);
     font-size: .72rem;
     cursor: pointer;
+}
+
+.da-file-field input[type="search"] {
+    cursor: text;
 }
 
 .da-file-field input::file-selector-button {

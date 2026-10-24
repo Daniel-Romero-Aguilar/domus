@@ -33,7 +33,8 @@ class LoanWorkflowTest extends TestCase
         parent::setUp();
 
         $this->travelTo(now()->setDate(2026, 4, 1)->setTime(10, 0));
-        $this->parent = User::factory()->create(['role' => 'parent']);
+        // Loan repayment scenarios advance months beyond the default trial.
+        $this->parent = User::factory()->create(['role' => 'parent', 'trial_ends_at' => now()->addYear()]);
         $this->child = User::factory()->create(['role' => 'child']);
         FamilyMember::create(['parent_user_id' => $this->parent->id, 'user_id' => $this->child->id]);
         Balance::create(['user_id' => $this->parent->id, 'amount' => 0]);
@@ -164,7 +165,7 @@ class LoanWorkflowTest extends TestCase
     {
         $unassigned = User::factory()->create(['role' => 'child']);
         $this->apiAs($unassigned, 'POST', '/api/loans', ['amount' => 100, 'reason' => 'Tenis', 'months' => 1])
-            ->assertUnprocessable();
+            ->assertForbidden()->assertJsonPath('is_enabled_functions', false);
     }
 
     public function test_direct_approval_uses_the_acceptance_date_and_deposits_only_once(): void
@@ -331,6 +332,7 @@ class LoanWorkflowTest extends TestCase
         $loan = $this->requestLoan();
         $otherParent = User::factory()->create(['role' => 'parent']);
         $otherChild = User::factory()->create(['role' => 'child']);
+        FamilyMember::create(['parent_user_id' => $otherParent->id, 'user_id' => $otherChild->id]);
         foreach (['approve', 'reject', 'review'] as $action) {
             $body = $action === 'review' ? $this->termsFor($loan) : [];
             $this->apiAs($otherParent, 'POST', "/api/loans/{$loan->id}/{$action}", $body)->assertForbidden();

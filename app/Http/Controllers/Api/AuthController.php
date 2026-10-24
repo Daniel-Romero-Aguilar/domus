@@ -26,6 +26,7 @@ class AuthController extends Controller
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
+            'role' => 'parent',
         ]);
 
         Balance::create([
@@ -42,6 +43,7 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
+                'is_enabled_functions' => $user->isEnabledFunctions(),
             ],
         ], 201);
     }
@@ -76,6 +78,7 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'username' => $user->username,
                 'role' => $user->role,
+                'is_enabled_functions' => $user->isEnabledFunctions(),
             ],
         ]);
     }
@@ -88,6 +91,7 @@ class AuthController extends Controller
                 'path' => $request->path(),
                 'ip' => $request->ip(),
             ]);
+
             return response()->json(['message' => 'Unauthenticated context in /me.'], 401);
         }
 
@@ -97,6 +101,7 @@ class AuthController extends Controller
                 'role' => $user->role,
                 'path' => $request->path(),
             ]);
+
             return response()->json(['message' => 'Invalid role for authenticated user.'], 422);
         }
 
@@ -110,8 +115,9 @@ class AuthController extends Controller
 
         $isFamilyMember = (bool) $familyRelation;
         $parentAdminName = $familyRelation?->parent?->name;
+
         return response()->json([
-            'user' => $user,
+            'user' => $user->append('is_enabled_functions'),
             'parent_admin_name' => $parentAdminName,
             'is_family_member' => $isFamilyMember,
         ]);

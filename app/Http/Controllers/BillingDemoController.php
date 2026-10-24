@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BillingSubscription;
 use App\Services\GooglePlayDemoClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -32,6 +33,7 @@ class BillingDemoController extends Controller
             }
 
             $expiresAt = CarbonImmutable::parse($record->expires_at, 'UTC');
+
             return $this->response($request, [
                 'eligible' => $expiresAt->isFuture(),
                 'acknowledged' => true,
@@ -51,6 +53,7 @@ class BillingDemoController extends Controller
                 'verified_at' => now(),
                 'updated_at' => now(),
             ]);
+
             return $this->response($request);
         }
 
@@ -96,7 +99,7 @@ class BillingDemoController extends Controller
             ], true), 422, 'La compra aún no está confirmada en Google Play.');
         }
 
-        // This table only records the demo. Never update users, roles or access.
+        // Persist verified purchases; User::isEnabledFunctions() reads this state.
         DB::transaction(function () use ($userId, $hash, $token, $details) {
             DB::table('billing_demo_subscriptions')->insertOrIgnore([
                 'user_id' => $userId,
@@ -155,12 +158,8 @@ class BillingDemoController extends Controller
         }
 
         $state = $purchase['subscriptionState'] ?? 'SUBSCRIPTION_STATE_UNSPECIFIED';
-        $eligible = in_array($state, [
-            'SUBSCRIPTION_STATE_ACTIVE',
-            'SUBSCRIPTION_STATE_IN_GRACE_PERIOD',
-            // Cancelled subscriptions remain valid until the paid period ends.
-            'SUBSCRIPTION_STATE_CANCELED',
-        ], true) && $expiresAt !== null && $expiresAt->isFuture();
+        $eligible = in_array($state, BillingSubscription::ELIGIBLE_STATES, true)
+            && $expiresAt !== null && $expiresAt->isFuture();
 
         return [
             'eligible' => $eligible,
@@ -172,9 +171,13 @@ class BillingDemoController extends Controller
 
     private function response(Request $request, ?array $details = null): JsonResponse
     {
+        // A verification may have just changed the purchase stored in this request.
+        $request->user()->unsetRelation('currentSubscription');
+
         return response()->json(['data' => [
             'account_id' => $this->accountId($request),
             'subscribed' => $details !== null && $details['eligible'] && $details['acknowledged'],
+            'is_enabled_functions' => $request->user()->isEnabledFunctions(),
             'product_id' => config('billing_demo.product_id'),
             'expires_at' => ($details['expires_at'] ?? null)?->toIso8601String(),
         ]]);

@@ -2,14 +2,17 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\AdminSubscriptionList;
 use App\Models\Admin;
 use App\Models\User;
 use App\Services\GooglePlayDemoClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
+use Livewire\Livewire;
 use Mockery;
 use Tests\TestCase;
 
@@ -93,6 +96,112 @@ class AdminSubscriptionsTest extends TestCase
             'acknowledged' => true,
             'expires_at' => '2026-11-18 09:00:00',
         ]);
+    }
+
+    public function test_refreshing_a_renewed_purchase_updates_the_admin_snapshot(): void
+    {
+        Carbon::setTestNow('2026-10-18 06:03:00');
+        config()->set('billing_demo.enabled', true);
+        config()->set('billing_demo.dummy_verification', false);
+        $user = User::factory()->create(['name' => 'Daniel Renovado']);
+        $this->subscription($user, 'SUBSCRIPTION_STATE_ACTIVE', true, '2026-10-18 06:06:00');
+        DB::table('billing_demo_subscriptions')->where('user_id', $user->id)->update([
+            'purchase_token' => Crypt::encryptString('purchase-token-'.$user->id),
+        ]);
+
+        Carbon::setTestNow('2026-10-18 06:24:00');
+        $owner = hash_hmac('sha256', 'subscription-demo:'.$user->id, config('app.key'));
+        $play = Mockery::mock(GooglePlayDemoClient::class);
+        $play->shouldReceive('lookup')->once()->with('purchase-token-'.$user->id)->andReturn([
+            'externalAccountIdentifiers' => ['obfuscatedExternalAccountId' => $owner],
+            'lineItems' => [['productId' => 'domus_dummy', 'expiryTime' => '2026-10-18T06:31:00Z']],
+            'subscriptionState' => 'SUBSCRIPTION_STATE_ACTIVE',
+            'acknowledgementState' => 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+        ]);
+        $this->app->instance(GooglePlayDemoClient::class, $play);
+
+        Sanctum::actingAs($user);
+        $this->getJson('/api/billing/demo')
+            ->assertOk()
+            ->assertJsonPath('data.subscribed', true)
+            ->assertJsonPath('data.expires_at', '2026-10-18T06:31:00+00:00');
+
+        $this->assertDatabaseHas('billing_demo_subscriptions', [
+            'user_id' => $user->id,
+            'expires_at' => '2026-10-18 06:31:00',
+            'verified_at' => '2026-10-18 06:24:00',
+        ]);
+
+        $admin = Admin::query()->create([
+            'name' => 'Administradora DOMUS',
+            'email' => 'admin-renewal@domus.test',
+            'password' => Hash::make('password'),
+        ]);
+        Livewire::actingAs($admin, 'admin_web')
+            ->test(AdminSubscriptionList::class)
+            ->assertSee('Daniel Renovado')
+            ->assertSee('Vence 18/10/2026 06:31 UTC')
+            ->assertSee('Verificado 18/10/2026 06:24 UTC')
+            ->assertSee('Suscrito');
+    }
+
+    public function test_livewire_filters_all_users_before_paginating_and_resets_the_page(): void
+    {
+        Carbon::setTestNow('2026-10-18 12:00:00');
+        $admin = Admin::query()->create([
+            'name' => 'Administradora DOMUS',
+            'email' => 'admin-filters@domus.test',
+            'password' => Hash::make('password'),
+        ]);
+        $juan = User::factory()->create(['name' => 'Juan Suscrito', 'email' => 'juan@example.test']);
+        $maria = User::factory()->create(['name' => 'Maria Pendiente', 'email' => 'maria@example.test']);
+        $ana = User::factory()->create(['name' => 'Ana Simulada']);
+        $luis = User::factory()->create(['name' => 'Luis Sin Compra']);
+        $eva = User::factory()->create(['name' => 'Eva Vencida']);
+        $paco = User::factory()->create(['name' => 'Paco Cancelada Vigente']);
+        $this->subscription($juan, 'SUBSCRIPTION_STATE_ACTIVE', true, '2026-11-18 09:00:00');
+        $this->subscription($maria, 'SUBSCRIPTION_STATE_ACTIVE', null, '2026-11-18 09:00:00');
+        $this->subscription($ana, 'DEMO_CONFIRMED', true, '2026-11-18 09:00:00');
+        $this->subscription($eva, 'SUBSCRIPTION_STATE_ACTIVE', true, '2026-10-17 09:00:00');
+        $this->subscription($paco, 'SUBSCRIPTION_STATE_CANCELED', true, '2026-11-18 09:00:00');
+
+        for ($index = 1; $index <= 11; $index++) {
+            User::factory()->create(['name' => 'Extra '.$index]);
+        }
+
+        Livewire::actingAs($admin, 'admin_web')
+            ->test(AdminSubscriptionList::class)
+            ->assertSee('Extra 11')
+            ->assertDontSee('Juan Suscrito')
+            ->call('nextPage')
+            ->assertSee('Juan Suscrito')
+            ->set('search', 'juan@example.test')
+            ->assertSee('Juan Suscrito')
+            ->assertDontSee('Maria Pendiente')
+            ->set('search', '')
+            ->set('status', 'subscribed')
+            ->assertSee('Juan Suscrito')
+            ->assertSee('Paco Cancelada Vigente')
+            ->assertDontSee('Maria Pendiente')
+            ->assertDontSee('Ana Simulada')
+            ->assertDontSee('Eva Vencida')
+            ->assertDontSee('Luis Sin Compra')
+            ->set('status', 'not_subscribed')
+            ->set('search', 'maria@example.test')
+            ->assertSee('Maria Pendiente')
+            ->assertDontSee('Juan Suscrito')
+            ->set('search', 'Ana Simulada')
+            ->assertSee('Ana Simulada')
+            ->set('search', 'Eva Vencida')
+            ->assertSee('Eva Vencida')
+            ->set('search', 'Luis Sin Compra')
+            ->assertSee('Luis Sin Compra')
+            ->assertDontSee('Juan Suscrito');
+    }
+
+    public function test_livewire_subscription_list_requires_the_admin_guard(): void
+    {
+        Livewire::test(AdminSubscriptionList::class)->assertForbidden();
     }
 
     private function subscription(User $user, string $state, ?bool $acknowledged, string $expiresAt): void

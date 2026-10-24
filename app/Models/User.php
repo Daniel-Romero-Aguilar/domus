@@ -3,9 +3,10 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Database\Factories\UserFactory;
-use App\Models\Balance;
 use App\Support\BalanceHelper;
+use Carbon\CarbonImmutable;
+use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -27,6 +28,10 @@ class User extends Authenticatable
     use HasProfilePhoto;
     use Notifiable;
     use TwoFactorAuthenticatable;
+
+    protected $attributes = [
+        'role' => 'parent',
+    ];
 
     /**
      * The attributes that are mass assignable.
@@ -51,6 +56,8 @@ class User extends Authenticatable
         'remember_token',
         'two_factor_recovery_codes',
         'two_factor_secret',
+        'trial_ends_at',
+        'currentSubscription',
     ];
 
     /**
@@ -81,7 +88,51 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'trial_ends_at' => 'immutable_datetime',
         ];
+    }
+
+    public function currentSubscription(): HasOne
+    {
+        return $this->hasOne(BillingSubscription::class)->ofMany(
+            ['verified_at' => 'max', 'id' => 'max'],
+            fn (Builder $query) => $query->where('product_id', config('billing_demo.product_id')),
+        );
+    }
+
+    public function accessAccount(): ?self
+    {
+        if ($this->role === 'parent') {
+            return $this;
+        }
+
+        // Family members share the owner's access and never start a new trial.
+        return FamilyMember::query()->where('user_id', $this->id)->with('parent')->first()?->parent;
+    }
+
+    public function trialExpiresAt(): ?CarbonImmutable
+    {
+        return $this->trial_ends_at
+            ?? $this->created_at?->toImmutable()->addDays(max(0, (int) config('access.trial_days')));
+    }
+
+    public function isEnabledFunctions(): bool
+    {
+        if (! $this->exists) {
+            return false;
+        }
+
+        $account = $this->accessAccount();
+
+        return $account !== null && (
+            ($account->trialExpiresAt()?->isFuture() ?? false)
+            || ($account->currentSubscription?->isPremium() ?? false)
+        );
+    }
+
+    public function getIsEnabledFunctionsAttribute(): bool
+    {
+        return $this->isEnabledFunctions();
     }
 
     public function balance(): HasOne

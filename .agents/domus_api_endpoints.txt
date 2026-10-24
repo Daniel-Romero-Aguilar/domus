@@ -14,8 +14,29 @@ Flutter usage notes
 - Parent and child/member screens should be separate pages/providers, not one giant role-conditional page.
 - After POST actions, update UI with the returned entity/balance first, then refresh the list if needed.
 - If an action returns unlocked_badges, show a badge earned modal/toast.
-- Cobertura: este archivo refleja las 59 combinaciones metodo/ruta definidas en `routes/api.php`. Las rutas web de Blade/admin no son endpoints de esta API y no se mezclan aqui.
+- Cobertura: este archivo refleja las 61 combinaciones metodo/ruta de `routes/api.php` y `routes/billing_demo.php` (incluido desde el primero). Las rutas web de Blade/admin no son endpoints de esta API y no se mezclan aqui.
 - Para campos de entrada con regla Laravel `integer`, se aceptan enteros JSON y cadenas que `FILTER_VALIDATE_INT` reconozca como enteros; `boolean` admite booleanos JSON, `0`, `1`, `"0"` y `"1"`; `numeric` admite números JSON y cadenas numéricas. Las reglas `string`, `regex`, `in`, `min` y `max` de cada endpoint restringen además estos conjuntos. Los tipos declarados de salida se refieren al JSON serializado, no al tipo del campo de entrada.
+
+Acceso a funciones: regla global para toda la API
+- El backend centraliza la decision en `User::isEnabledFunctions(): bool`. El front recibe un booleano JSON real, nunca `"true"`/`"false"` ni `0`/`1`, y no calcula fechas ni decide si una suscripcion da acceso.
+- Una cuenta `parent` tiene acceso mientras siga vigente su periodo gratuito O tenga Premium real vigente. Por defecto el periodo termina exactamente en `created_at + 15 dias`; `FREE_TRIAL_DAYS` configura `access.trial_days`. El superadmin puede fijar otro vencimiento por cuenta sin cambiar `created_at`. Al llegar a la fecha exacta de vencimiento, ese periodo ya no da acceso.
+- Los roles `child` y `member` comparten el acceso del `parent` asociado en `family_members`; crear un integrante no inicia otro periodo gratuito. Sin padre asociado, el acceso a funciones es `false`.
+- Premium se decide con la ultima verificacion guardada para el producto configurado: `verified_at` descendente y, si empata, `id` descendente. Requiere `acknowledged = true`, vencimiento futuro y estado `SUBSCRIPTION_STATE_ACTIVE`, `SUBSCRIPTION_STATE_IN_GRACE_PERIOD` o `SUBSCRIPTION_STATE_CANCELED`. Una cancelacion conserva el acceso hasta acabar el periodo pagado. Una compra simulada (`DEMO_CONFIRMED`) no otorga Premium real.
+- Se bloquean las 54 rutas de funciones, tanto consultas GET como escrituras: notificaciones, niveles/puntos, metas, saldo, retiros, transferencias, familia, mesadas, cajas de ahorro, prestamos, educacion y tareas. Los permisos de rol y pertenencia de cada seccion siguen aplicando cuando hay acceso.
+- Estas siete rutas quedan disponibles aunque las funciones esten bloqueadas: `POST /api/register`, `POST /api/login`, `GET /api/me`, `GET /api/user`, `POST /api/logout`, `GET /api/billing/demo` y `POST /api/billing/demo/verify`. Las rutas privadas siguen requiriendo token; las de billing tambien requieren estar habilitadas en configuracion.
+- Si una ruta de funciones devuelve el bloqueo de acceso, responde HTTP `403` con este JSON y no ejecuta la accion ni modifica sus datos:
+```json
+{
+  "message": "Tu periodo gratuito ha terminado. Necesitas Premium para usar las funciones de Domus.",
+  "code": "FUNCTIONS_DISABLED",
+  "is_enabled_functions": false
+}
+```
+- `code = FUNCTIONS_DISABLED` identifica esta alerta sin comparar el texto de `message`. Un `403` por rol/pertenencia no lleva este codigo ni implica que la suscripcion haya vencido. Un `401` sigue siendo un problema de autenticacion.
+- Integracion Flutter: leer `user.is_enabled_functions` en registro, login y `GET /api/me`; en `GET /api/user` leer `is_enabled_functions` en la raiz. Si es `false`, bloquear las funciones y mostrar la alerta de acceso; conservar la sesion para consultar/comprar Premium o cerrar sesion. Para hijos/integrantes, el titular de su familia debe recuperar el acceso.
+- Si una peticion falla con `403` y `code = FUNCTIONS_DISABLED`, actualizar el estado local a `false` y mostrar `message`. Esto cubre el vencimiento mientras la app sigue abierta. Tras consultar/verificar una compra, usar `data.is_enabled_functions` y refrescar `GET /api/me` cuando sea necesario. No sustituir esta bandera por `data.subscribed`: durante la prueba puede haber acceso sin compra.
+- La bandera solo se incluye en las respuestas de autenticacion/usuario y billing indicadas, y en el error de bloqueo. No se agrega a cada respuesta funcional ni a los usuarios anidados de familia, tareas o prestamos. `trial_ends_at` y la relacion `current_subscription` no se exponen en el usuario autenticado.
+- Esta regla global se aplica a todas las secciones funcionales siguientes aunque cada endpoint enumere solamente sus permisos y errores particulares. Las tareas programadas internas no son endpoints y conservan su ejecucion.
 
 Convencion monetaria
 - Los campos `*_cents` son enteros en centavos de MXN. Ejemplo: `10000` = `$100.00`.
@@ -39,6 +60,7 @@ User = {
   email: string|null,
   username: string|null,
   role: "parent"|"child"|"member",
+  is_enabled_functions: boolean,
   email_verified_at: ISODateTime,
   two_factor_confirmed_at: string|null,
   current_team_id: integer|null,
@@ -71,9 +93,10 @@ Body: name, email, password, password_confirmation, terms_accepted
 Body types: `name:string` requerido (max 255), `email:string` requerido (formato email, max 255, unico), `password:string` requerido (min 8), `password_confirmation:string` requerido e igual a password, `terms_accepted` requerido por la regla Laravel `accepted` (acepta `yes`, `on`, `1`, `true` o booleano `true`).
 Success `201`:
 ```json
-{ "message": "string", "token": "string", "user": { "id": "integer", "name": "string", "email": "string" } }
+{ "message": "string", "token": "string", "user": { "id": "integer", "name": "string", "email": "string", "is_enabled_functions": "boolean" } }
 ```
 The created account has role `parent` and an initial zero balance.
+`user.is_enabled_functions` refleja la regla global; normalmente es `true` al registrarse con la configuracion predeterminada de 15 dias. El cliente no puede modificar la bandera ni el vencimiento enviandolos en el body.
 
 POST /api/login
 Auth: none
@@ -84,10 +107,11 @@ Success `200`:
 {
   "message": "string",
   "token": "string",
-  "user": { "id": "integer", "name": "string", "email": "string|null", "username": "string|null", "role": "parent|child|member" }
+  "user": { "id": "integer", "name": "string", "email": "string|null", "username": "string|null", "role": "parent|child|member", "is_enabled_functions": "boolean" }
 }
 ```
 Invalid credentials: `401 { "message": "string" }`.
+Con credenciales validas el login sigue respondiendo `200` y entregando token aunque `user.is_enabled_functions` sea `false`.
 
 GET /api/me
 Auth: bearer token
@@ -95,16 +119,57 @@ Success `200`:
 ```json
 { "user": "User", "parent_admin_name": "string|null", "is_family_member": "boolean" }
 ```
+`user.is_enabled_functions` siempre esta presente como booleano y se calcula en el servidor con el acceso actual de la cuenta/familia. Un acceso vencido no impide consultar este endpoint: devuelve `200` y la bandera `false`.
 For a child/member, `user` includes the loaded `balance:BalanceRecord|null` relation; for a parent that relation key is absent. The appended `balance_cents` and `balance_display` are always part of the serialized user. `balance.amount` comes from an Eloquent model without a cast, so use `balance_cents` for a JSON integer with a guaranteed type.
 
 GET /api/user
 Auth: bearer token
 Success `200`: serialized `User` object directly (not wrapped in `{user:...}`).
+Incluye `is_enabled_functions:boolean` en la raiz. Este endpoint tambien sigue disponible con acceso vencido.
 
 POST /api/logout
 Auth: bearer token
 Success `200`: `{ "message": "string" }`. The current Sanctum token is revoked.
 `config/sanctum.php` sets token `expiration` to `null`, and login/register create tokens without an individual expiration. There is no refresh-token endpoint. A `401` after authentication means the token is missing, invalid or revoked, or the server configuration has changed.
+
+Billing / suscripciones Google Play
+Contrato comun:
+- Las dos rutas requieren `Authorization: Bearer <Sanctum token>` y comparten limite de 30 peticiones por minuto (`429` al excederlo). No exigen funciones habilitadas: una cuenta vencida debe poder recuperar su acceso.
+- Si `billing_demo.enabled` es `false` (`GOOGLE_PLAY_DEMO_ENABLED=false`), responden `404`.
+- `account_id` es un identificador opaco de la cuenta autenticada para asociar la compra de Google Play (`obfuscatedExternalAccountId`). No es el UUID `user.billing_account_id` y no deben intercambiarse.
+- El registro usado por `isEnabledFunctions()` es el estado guardado de la compra; `GET /api/me` no consulta Google Play. Las rutas de billing consultan/verifican Google cuando estan en modo real. Aun no hay endpoint de webhooks.
+- Ambas respuestas de exito usan la misma forma:
+```json
+{
+  "data": {
+    "account_id": "string",
+    "subscribed": "boolean",
+    "is_enabled_functions": "boolean",
+    "product_id": "string",
+    "expires_at": "ISO-8601 datetime|null"
+  }
+}
+```
+- `subscribed` indica si la compra consultada/verificada es elegible, esta reconocida y no ha vencido. `is_enabled_functions` es la decision final de acceso de la cuenta/familia, incluida la prueba gratuita. `expires_at` es el vencimiento de la compra devuelta, no el de la prueba gratuita.
+- Con `GOOGLE_PLAY_DEMO_DUMMY_VERIFICATION=true`, una simulacion puede devolver `subscribed:true` pero no otorga Premium real; despues de la prueba gratuita `is_enabled_functions` puede seguir siendo `false`.
+
+GET /api/billing/demo
+Auth: bearer token (no requiere funciones habilitadas).
+Body: ninguno.
+Success `200`: forma comun de billing descrita arriba.
+- Selecciona la ultima compra guardada del producto configurado para el usuario autenticado. En modo real consulta Google Play y actualiza su estado guardado, reconocimiento, vencimiento y fecha de verificacion.
+- Sin compra guardada devuelve `subscribed:false` y `expires_at:null`, pero calcula normalmente `is_enabled_functions` (puede ser `true` durante la prueba).
+- Si Google informa que la compra ya no existe/vencio, guarda el estado expirado y responde `subscribed:false`, `expires_at:null` y la bandera de acceso recalculada.
+- Errors: `401` token invalido; `403` compra asociada a otra cuenta; `404` billing deshabilitado; `422` producto de compra incorrecto; `429` limite de peticiones; `503` fallo de configuracion/conexion/verificacion con Google Play. Los errores de billing no usan `FUNCTIONS_DISABLED`.
+
+POST /api/billing/demo/verify
+Auth: bearer token (no requiere funciones habilitadas).
+Body: `product_id:string` requerido, debe coincidir con `config('billing_demo.product_id')` (actualmente `domus_dummy`); `purchase_token:string` requerido, maximo 4096 caracteres.
+Success `200`: forma comun de billing descrita arriba.
+- En modo real verifica la compra, el producto y que `obfuscatedExternalAccountId` coincida con la cuenta autenticada. Guarda la compra, y si es elegible pero aun no esta reconocida, completa su reconocimiento con Google Play.
+- Una compra vigente verificada permite recuperar acceso inmediatamente: la respuesta recalcula `data.is_enabled_functions` tras guardarla. Un integrante sigue dependiendo de la suscripcion/prueba del padre, no de una compra propia.
+- Un token de compra ya guardado para otra cuenta responde `403`. Repetir una verificacion de la misma cuenta actualiza su registro, sin crear otra suscripcion por el mismo token.
+- Errors: `401` token invalido; `403` compra de otra cuenta; `404` billing deshabilitado; `422` body invalido, comprobante inexistente/vencido, producto incorrecto o compra pendiente; `429` limite de peticiones; `503` fallo de configuracion/conexion/verificacion/reconocimiento con Google Play. Una compra con estado no elegible puede devolver `200` con `subscribed:false`; no interpretar el HTTP `200` como Premium activo.
 
 GET /api/notifications
 Auth: bearer token
@@ -571,7 +636,7 @@ Entrada inicial del hijo
 - `reason`: requerido; string de máximo 120 caracteres; no puede quedar vacío al recortarlo; rechaza etiquetas HTML (cuando `strip_tags` altera el texto) y caracteres de control. Se guarda recortado. Las comillas y otros caracteres ordinarios se guardan como texto y no se ejecutan como SQL.
 - `months`: requerido; entero dentro de la lista permitida exacta `1`, `3`, `6`, `12`. Los meses representan cuotas mensuales.
 - Validación adicional: el total debe alcanzar al menos un centavo por cuota; si `amount` en centavos es menor que `months`, responde `422`.
-- El padre asociado se deriva de la relación familiar de la cuenta autenticada. Si no existe, responde `422`.
+- El padre asociado se deriva de la relación familiar de la cuenta autenticada. Si no existe, el control global de acceso bloquea la peticion con `403`, `code: FUNCTIONS_DISABLED` e `is_enabled_functions:false`.
 - Condiciones calculadas y guardadas por servidor: `installments_count = months`, `installment_frequency = monthly`, `has_interest = false`, `interest_mode = percent`, `annual_interest_rate = 0`, `fixed_interest_amount = "0.00"`, `total_amount = amount`, y `installment_amount` se calcula en centavos como el importe por cuota redondeado hacia arriba. `due_date` e `initial_due_date` se calculan a un mes calendario desde la fecha de solicitud, sin desbordar el último día del mes.
 - Se guardan los tres datos originales en `requested_amount`, `requested_reason`, `requested_months`, además de las condiciones iniciales derivadas `initial_*`. No se crea una fila `loan_payments` ni se acredita saldo al enviar esta solicitud. Estado inicial: `pending`.
 - Éxito `201`: `{ "message": string, "loan": Loan }`. No se serializa necesariamente la relación `payments` en esta respuesta de creación; `payment_summary` existe y tiene cero cuotas.
@@ -832,7 +897,7 @@ Condiciones: la cuota debe estar vencida hoy o antes, no estar pagada y el saldo
 
 Errores comunes de las rutas de préstamos
 - `401`: token ausente/inválido o contexto autenticado ausente.
-- `403`: rol no autorizado o el préstamo/cuota no pertenece al usuario autenticado.
+- `403`: acceso a funciones bloqueado (`code: FUNCTIONS_DISABLED`, `is_enabled_functions:false`), rol no autorizado o el préstamo/cuota no pertenece al usuario autenticado. Solo el bloqueo de acceso incluye ese codigo y bandera.
 - `404`: ID de `loan` o `loanPayment` inexistente (route model binding).
 - `422`: validación fallida, campo adicional prohibido en cuerpos estrictos, estado incompatible, reserva inconsistente, fecha aún no vencida o saldo insuficiente. La respuesta de validación Laravel usa `{ "message": string, "errors": { "campo": [string] } }`; algunos errores de estado devuelven solo `message`.
 

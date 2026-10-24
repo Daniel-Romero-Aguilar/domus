@@ -13,11 +13,12 @@ use App\Http\Controllers\Api\TransferController;
 use App\Http\Controllers\Api\LoanController;
 use App\Http\Controllers\Api\SavingsBoxController;
 use App\Http\Controllers\Api\TaskController;
+use App\Http\Middleware\EnsureFunctionsEnabled;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/user', function (Request $request) {
-    return $request->user();
+    return $request->user()->append('is_enabled_functions');
 })->middleware('auth:sanctum');
 
 Route::post('/register', [AuthController::class, 'register']);
@@ -26,6 +27,9 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
+});
+
+Route::middleware(['auth:sanctum', EnsureFunctionsEnabled::class])->group(function () {
     Route::get('/notifications', [DomusNotificationController::class, 'index']);
     Route::get('/domus-levels', [DomusPointsController::class, 'levelsIndex']);
     Route::get('/parent/domus-points', [DomusPointsController::class, 'parentIndex']);

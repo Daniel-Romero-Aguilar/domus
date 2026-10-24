@@ -120,6 +120,8 @@ class SavingsBoxLimitTest extends TestCase
         config()->set('savings_box.months_available', [1]);
         config()->set('savings_box.days_per_cycle', 14);
         [$parent, $child] = $this->familyWithChildren(1);
+        // This scenario exercises deposits after the default trial has ended.
+        $parent->forceFill(['trial_ends_at' => now()->addDays(45)])->save();
         $boxId = $this->createBox($parent, 1, '10.00', true)->json('savings_box.id');
         Balance::query()->create(['user_id' => $child->id, 'amount' => 5000]);
 
