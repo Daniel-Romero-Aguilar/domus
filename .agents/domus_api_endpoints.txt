@@ -17,11 +17,64 @@ Flutter usage notes
 - Cobertura: este archivo refleja las 61 combinaciones metodo/ruta de `routes/api.php` y `routes/billing_demo.php` (incluido desde el primero). Las rutas web de Blade/admin no son endpoints de esta API y no se mezclan aqui.
 - Para campos de entrada con regla Laravel `integer`, se aceptan enteros JSON y cadenas que `FILTER_VALIDATE_INT` reconozca como enteros; `boolean` admite booleanos JSON, `0`, `1`, `"0"` y `"1"`; `numeric` admite números JSON y cadenas numéricas. Las reglas `string`, `regex`, `in`, `min` y `max` de cada endpoint restringen además estos conjuntos. Los tipos declarados de salida se refieren al JSON serializado, no al tipo del campo de entrada.
 
+Actualizacion para Flutter (24/10/2026): vencimiento de la demo
+El backend ahora entrega la fecha efectiva de vencimiento de la demo en `GET /api/me`, dentro de `user.trial_expires_at`. Este es el campo que debe usar el frontend para mostrar "Tu demo vence el...". Antes esa fecha no estaba disponible en la respuesta; ahora se obtiene directamente del backend y respeta los cambios del administrador.
+
+Contrato del nuevo campo
+- Nombre y ruta JSON: `user.trial_expires_at`.
+- Tipo: `string|null`. Una fecha es ISO-8601 UTC con offset, por ejemplo `"2026-11-12T12:00:00+00:00"`. En Flutter, modelarla como `DateTime?`.
+- Siempre esta presente en una respuesta exitosa `200` de `GET /api/me`, incluso cuando su valor es `null`.
+- Para `parent`, corresponde a su propia demo. Para `child` y `member`, corresponde a la demo del titular de su familia; el registro del integrante no inicia otra demo. Sin titular asociado, devuelve `null`.
+- Reutiliza `User::trialExpiresAt()`, la misma regla que consulta el permiso centralizado. Si el administrador fijo `trial_ends_at`, esa fecha tiene prioridad; de lo contrario, el servidor resuelve el vencimiento con la fecha de registro del titular y la duracion configurada.
+- Conserva la fecha aunque la demo ya haya vencido o haya Premium activo. Por tanto, una fecha de demo pasada no significa por si sola que las funciones esten bloqueadas.
+- Es un dato de salida de solo lectura. Enviar `trial_expires_at` o `trial_ends_at` en registro/login no modifica la demo.
+- `trial_ends_at` sigue siendo un dato interno que no se serializa. No hay contradiccion: el nuevo campo publico se llama `trial_expires_at` y representa el vencimiento efectivo, no el valor crudo de esa columna.
+
+Disponibilidad por endpoint
+| Endpoint | Donde obtener la fecha de demo |
+| --- | --- |
+| `GET /api/me` | `user.trial_expires_at`, siempre presente en un `200`. |
+| `POST /api/register` y `POST /api/login` | No incluyen esa fecha; guardar el token y completar el usuario con `/me`. |
+| `GET /api/user` | No incluye esa fecha; usar `/me`. |
+| `GET /api/billing/demo` y `POST /api/billing/demo/verify` | No incluyen `trial_expires_at`; al terminar el flujo de billing, consultar `/me`. |
+
+Integracion requerida en Flutter
+1. Agregar `trial_expires_at` nullable al modelo que deserializa `user` de `/me` y al estado que alimenta la tarjeta de demo. El campo es adicional; no cambia el body de las peticiones.
+2. Parsear la fecha respetando su offset UTC y convertirla a la zona local solo para mostrarla. No calcular `created_at + 15`, fijar una duracion local ni usar la fecha de registro del hijo/integrante.
+3. Elegir la tarjeta con las banderas del servidor: Premium si `has_active_subscription` es `true`; cobertura provisional si `is_premium_grace_period` es `true`; demo si ambas son `false` e `is_enabled_functions` es `true`. En la tarjeta de demo, usar `trial_expires_at` para "Tu demo vence el {fecha}". Si vale `null`, mostrar acceso gratuito sin inventar una fecha.
+4. Mantener `is_enabled_functions` como decision de acceso. Si es `false`, bloquear las funciones segun la regla global. No conceder ni quitar acceso comparando `trial_expires_at` con el reloj del telefono.
+5. Reemplazar la fecha guardada cada vez que se reciba un `/me` exitoso, incluido `null`. Un cambio administrativo se refleja en la siguiente consulta; no hay un aviso push de ese cambio. Para actualizar solo la fecha de demo basta `/me`; para sincronizar una compra con Google se mantiene el flujo billing y despues `/me` descrito mas adelante.
+
+No intercambiar las tres fechas
+| Campo de `user` en `/me` | Significado para la UI |
+| --- | --- |
+| `trial_expires_at` | Fin de la demo/prueba gratuita, incluidas extensiones o reducciones administrativas. |
+| `premium_expires_at` | Vencimiento real conocido de una compra de Premium; puede ser pasado o `null`. |
+| `premium_grace_ends_at` | Limite de la cobertura provisional de Domus, solo mientras esa cobertura esta vigente. |
+
+Ejemplo parcial de un `GET /api/me` durante una demo vigente (evaluado el 24/10/2026). Los demas campos del usuario tambien se devuelven:
+```json
+{
+  "user": {
+    "is_enabled_functions": true,
+    "trial_expires_at": "2026-11-12T12:00:00+00:00",
+    "premium_expires_at": null,
+    "has_active_subscription": false,
+    "auto_renew_enabled": null,
+    "is_premium_grace_period": false,
+    "premium_grace_ends_at": null
+  }
+}
+```
+En este ejemplo, mostrar "Tu demo vence el 12 de noviembre de 2026" convirtiendo la fecha a la zona elegida para la UI. Si el administrador cambia el vencimiento, el siguiente `/me` entrega la nueva fecha. Los ejemplos de `/me` y la tabla de estados de billing mas adelante cubren Premium activo, tolerancia y funciones bloqueadas.
+
+
 Acceso a funciones: regla global para toda la API
 - El backend centraliza la decision en `User::isEnabledFunctions(): bool`. El front recibe un booleano JSON real, nunca `"true"`/`"false"` ni `0`/`1`. Puede formatear fechas y ordenar la informacion para mostrarla, pero no calcula vencimientos ni decide si una suscripcion da acceso.
-- Una cuenta `parent` tiene acceso mientras siga vigente su periodo gratuito O tenga Premium real vigente. Por defecto el periodo termina exactamente en `created_at + 15 dias`; `FREE_TRIAL_DAYS` configura `access.trial_days`. El superadmin puede fijar otro vencimiento por cuenta sin cambiar `created_at`. Al llegar a la fecha exacta de vencimiento, ese periodo ya no da acceso.
+- Una cuenta `parent` tiene acceso mientras siga vigente su periodo gratuito O tenga Premium real vigente O este cubierta por la tolerancia provisional de una compra validada por Google. Por defecto el periodo gratuito termina exactamente en `created_at + 15 dias`; `FREE_TRIAL_DAYS` configura `access.trial_days`. El superadmin puede fijar otro vencimiento por cuenta sin cambiar `created_at`. Al llegar a la fecha exacta de vencimiento, ese periodo ya no da acceso; puede seguir habiendo acceso por Premium o por tolerancia.
 - Los roles `child` y `member` comparten el acceso del `parent` asociado en `family_members`; crear un integrante no inicia otro periodo gratuito. Sin padre asociado, el acceso a funciones es `false`.
-- Premium se decide con la ultima verificacion guardada para el producto configurado: `verified_at` descendente y, si empata, `id` descendente. Requiere `acknowledged = true`, vencimiento futuro y estado `SUBSCRIPTION_STATE_ACTIVE`, `SUBSCRIPTION_STATE_IN_GRACE_PERIOD` o `SUBSCRIPTION_STATE_CANCELED`. Una cancelacion conserva el acceso hasta acabar el periodo pagado. Una compra simulada (`DEMO_CONFIRMED`) no otorga Premium real.
+- La compra actual se selecciona entre las no reemplazadas del producto configurado: mayor `expires_at`, luego mayor `verified_at` y finalmente mayor `id`. Un comprobante viejo vencido no desplaza una compra vigente; si Google enlaza una compra nueva con una anterior, la anterior queda retirada aunque tuviera una fecha mayor. Premium real requiere `acknowledged = true`, vencimiento futuro y estado `SUBSCRIPTION_STATE_ACTIVE`, `SUBSCRIPTION_STATE_IN_GRACE_PERIOD` o `SUBSCRIPTION_STATE_CANCELED`. Una cancelacion conserva el periodo pagado. Una compra simulada (`DEMO_CONFIRMED`) no otorga Premium real ni tolerancia.
+- La tolerancia es una cobertura de Domus, distinta del periodo de gracia de cobro de Google. Por defecto dura hasta tres dias, configurables con `SUBSCRIPTION_GRACE_DAYS` (`0` la desactiva). Solo aplica a una compra validada por Google: durante un reconocimiento pendiente se cuenta desde su primera validacion, sin superar el vencimiento de la compra; para una renovacion aun no confirmada se cuenta desde el vencimiento pagado conocido. No se extiende al entrar, refrescar o reintentar. Una renovacion desactivada no recibe dias extra despues del periodo pagado; un vencimiento, suspension o pausa confirmados por Google tampoco reciben esa cobertura. Ver los casos de billing antes de construir las alertas.
 - Se bloquean las 54 rutas de funciones, tanto consultas GET como escrituras: notificaciones, niveles/puntos, metas, saldo, retiros, transferencias, familia, mesadas, cajas de ahorro, prestamos, educacion y tareas. Los permisos de rol y pertenencia de cada seccion siguen aplicando cuando hay acceso.
 - Estas siete rutas quedan disponibles aunque las funciones esten bloqueadas: `POST /api/register`, `POST /api/login`, `GET /api/me`, `GET /api/user`, `POST /api/logout`, `GET /api/billing/demo` y `POST /api/billing/demo/verify`. Las rutas privadas siguen requiriendo token; las de billing tambien requieren estar habilitadas en configuracion.
 - Si una ruta de funciones devuelve el bloqueo de acceso, responde HTTP `403` con este JSON y no ejecuta la accion ni modifica sus datos:
@@ -34,10 +87,10 @@ Acceso a funciones: regla global para toda la API
 ```
 - `code = FUNCTIONS_DISABLED` identifica esta alerta sin comparar el texto de `message`. Un `403` por rol/pertenencia no lleva este codigo ni implica que la suscripcion haya vencido. Un `401` sigue siendo un problema de autenticacion.
 - Integracion Flutter: leer `user.is_enabled_functions` en registro, login y `GET /api/me`; en `GET /api/user` leer `is_enabled_functions` en la raiz. Si es `false`, bloquear las funciones y mostrar la alerta de acceso; conservar la sesion para consultar/comprar Premium o cerrar sesion. Para hijos/integrantes, el titular de su familia debe recuperar el acceso.
-- Solo `GET /api/me` agrega `user.premium_expires_at: string ISO-8601 UTC|null`, con el ultimo vencimiento conocido de una compra real de la cuenta/familia, incluso si ya paso. Sin compra real con fecha conocida devuelve `null`. Es informacion para presentar en el front; no sustituye `is_enabled_functions` ni representa el vencimiento de la prueba gratuita.
+- Solo `GET /api/me` agrega al usuario `trial_expires_at`, `premium_expires_at`, `has_active_subscription`, `auto_renew_enabled`, `is_premium_grace_period` y `premium_grace_ends_at`. Los seis campos siempre existen en ese endpoint, incluidos sus valores `null` cuando corresponda. No estan en login, registro ni `GET /api/user`. Son datos para las vistas; `is_enabled_functions` sigue siendo la decision final de acceso.
 - Comprobar el estado HTTP antes de interpretar el usuario: las respuestas de error de login/registro o `/me` no incluyen necesariamente `user` ni sus campos. El error `403` con `code: FUNCTIONS_DISABLED` tiene su propia forma, con la bandera en la raiz.
-- Si una peticion falla con `403` y `code = FUNCTIONS_DISABLED`, actualizar el estado local a `false` y mostrar `message`. Esto cubre el vencimiento mientras la app sigue abierta. Tras consultar/verificar una compra, usar `data.is_enabled_functions` y refrescar `GET /api/me` cuando sea necesario. No sustituir esta bandera por `data.subscribed`: durante la prueba puede haber acceso sin compra.
-- La bandera solo se incluye en las respuestas de autenticacion/usuario y billing indicadas, y en el error de bloqueo. No se agrega a cada respuesta funcional ni a los usuarios anidados de familia, tareas o prestamos. `trial_ends_at` y la relacion `current_subscription` no se exponen en el usuario autenticado.
+- Si una peticion falla con `403` y `code = FUNCTIONS_DISABLED`, actualizar el estado local a `false` y mostrar la alerta de acceso. Esto cubre el vencimiento mientras la app sigue abierta. Tras consultar/verificar una compra, usar `data.is_enabled_functions` y volver a consultar `GET /api/me` para completar el usuario. No sustituir esta bandera por `data.subscribed` ni por `user.has_active_subscription`: durante la prueba o la tolerancia puede haber acceso sin Premium real activo.
+- La bandera solo se incluye en las respuestas de autenticacion/usuario y billing indicadas, y en el error de bloqueo. No se agrega a cada respuesta funcional ni a los usuarios anidados de familia, tareas o prestamos. `trial_ends_at` y la relacion `current_subscription` no se exponen en el usuario autenticado; el vencimiento efectivo de la demo se entrega como `user.trial_expires_at` en `GET /api/me`.
 - Esta regla global se aplica a todas las secciones funcionales siguientes aunque cada endpoint enumere solamente sus permisos y errores particulares. Las tareas programadas internas no son endpoints y conservan su ejecucion.
 
 Convencion monetaria
@@ -74,9 +127,16 @@ User = {
   balance_display: string
 }
 
-MeUser = User + { premium_expires_at: ISODateTime }
-# MeUser es el usuario de GET /api/me; premium_expires_at siempre existe, aunque sea null.
-# User es el usuario de GET /api/user, donde premium_expires_at no se agrega.
+MeUser = User + {
+  trial_expires_at: ISODateTime,
+  premium_expires_at: ISODateTime,
+  has_active_subscription: boolean,
+  auto_renew_enabled: boolean|null,
+  is_premium_grace_period: boolean,
+  premium_grace_ends_at: ISODateTime
+}
+# MeUser es el usuario de GET /api/me; los seis campos adicionales siempre existen.
+# User es el usuario de GET /api/user, donde no se agregan esos seis campos.
 # Login y registro devuelven los objetos reducidos descritos en sus endpoints, no User/MeUser completos.
 
 UserChild = { id: integer, name: string, username: string|null, profile_photo_url: string, balance_cents: integer, balance_display: string }
@@ -112,7 +172,7 @@ Success `201`:
 }
 ```
 Tipos de salida: `message:string`, `token:string`, `user.id:integer`, `user.name:string`, `user.email:string`, `user.is_enabled_functions:boolean`.
-La cuenta creada tiene rol `parent` y saldo inicial cero. Esta respuesta no incluye `user.role` ni `user.premium_expires_at`; consultar `GET /api/me` para obtener el usuario completo con esos campos.
+La cuenta creada tiene rol `parent` y saldo inicial cero. Esta respuesta no incluye `user.role`, `user.trial_expires_at` ni `user.premium_expires_at`; consultar `GET /api/me` para obtener el usuario completo con esos campos.
 `user.is_enabled_functions` refleja la regla global; normalmente es `true` al registrarse con la configuracion predeterminada de 15 dias. El cliente no puede modificar la bandera ni el vencimiento enviandolos en el body.
 
 POST /api/login
@@ -135,7 +195,7 @@ Success `200`:
 }
 ```
 Tipos de salida: `message:string`, `token:string`, `user.id:integer`, `user.name:string`, `user.email:string|null`, `user.username:string|null`, `user.role:parent|child|member`, `user.is_enabled_functions:boolean`.
-No incluye `user.premium_expires_at`; despues de guardar el token, consultar `GET /api/me` para obtener esa fecha y el usuario completo.
+No incluye los seis campos de prueba y suscripcion de `MeUser`. Despues de guardar el token, seguir el flujo de entrada de la seccion de billing: actualizar billing y despues consultar `GET /api/me` para obtener el usuario completo.
 Invalid credentials: `401 { "message": "string" }`.
 Con credenciales validas el login sigue respondiendo `200` y entregando token aunque `user.is_enabled_functions` sea `false`.
 
@@ -146,24 +206,35 @@ Success `200`:
 { "user": "MeUser", "parent_admin_name": "string|null", "is_family_member": "boolean" }
 ```
 `user.is_enabled_functions` siempre esta presente como booleano y se calcula en el servidor con el acceso actual de la cuenta/familia. Un acceso vencido no impide consultar este endpoint: devuelve `200` y la bandera `false`.
-`user.premium_expires_at` siempre esta presente en este endpoint como fecha/hora ISO-8601 UTC o `null`. Devuelve el ultimo vencimiento conocido de una compra real guardada para el producto configurado, ordenada por `verified_at` descendente y luego `id` descendente; ignora compras simuladas y registros sin fecha. Sin compra real con vencimiento conocido devuelve `null`, incluso durante la prueba gratuita. Conserva fechas pasadas cuando Premium ya vencio o no se renovo; cancelar tampoco borra la fecha. Para hijos/integrantes corresponde a la suscripcion del titular de su familia; sin titular devuelve `null`.
-La fecha es informativa para mostrar/ordenar en el front; `user.is_enabled_functions` sigue siendo la decision de acceso. Se lee de los datos guardados, sin consultar Google Play. Este campo se agrega solo en `GET /api/me`, no en login, registro ni `GET /api/user`.
-Ejemplos parciales de los campos de acceso dentro de `user` (los demas campos de `MeUser` tambien se devuelven):
+Campos adicionales de prueba y suscripcion, siempre presentes dentro de `user`:
+- `trial_expires_at: ISODateTime`: vencimiento efectivo de la demo/prueba gratuita, calculado por la misma regla del permiso de acceso. Respeta `trial_ends_at` si el administrador lo fijo; de lo contrario usa `created_at` y `access.trial_days` en el servidor. Se devuelve en ISO-8601 UTC, incluso si ya paso o hay Premium activo. Sin titular familiar devuelve `null`. Es de solo lectura: el frontend solo formatea esta fecha y nunca la reconstruye con `created_at + 15`.
+- `premium_expires_at: ISODateTime`: vencimiento real conocido, incluso si ya paso. Considera compras reales no reemplazadas del producto configurado con fecha conocida, ordenadas por `expires_at`, `verified_at` e `id` descendentes. Ignora simulaciones; sin fecha real conocida devuelve `null`. No es el vencimiento de la prueba ni el fin de la tolerancia.
+- `has_active_subscription: boolean`: Premium real vigente y reconocido por Google segun el estado guardado. Sigue siendo `true` durante el periodo pagado aunque la renovacion este desactivada. Es `false` durante una tolerancia provisional sin Premium confirmado.
+- `auto_renew_enabled: boolean|null`: `true` indica renovacion automatica activa; `false` indica desactivada. `null` significa que no hay Premium real vigente o que no se conoce la renovacion. No convertir `null` en `false`. La bandera describe el ultimo dato conocido; no garantiza que el proximo cobro vaya a completarse.
+- `is_premium_grace_period: boolean`: indica cobertura provisional de Domus. Si es `true`, `is_enabled_functions` tambien es `true`, `has_active_subscription` es `false` y `premium_grace_ends_at` contiene la fecha limite.
+- `premium_grace_ends_at: ISODateTime`: fecha limite de la cobertura provisional SOLO mientras esta vigente. Fuera de ella devuelve `null`; no es un historial de tolerancias anteriores.
+Para `child` y `member`, todos estos datos pertenecen al titular de su familia. Sin titular: `trial_expires_at:null`, `has_active_subscription:false`, `auto_renew_enabled:null`, `premium_expires_at:null`, `is_premium_grace_period:false` y `premium_grace_ends_at:null`.
+Este endpoint lee el estado guardado: NO consulta Google, NO dispara reintentos y NO actualiza por si mismo la renovacion al iniciar sesion. Para actualizar desde Google usar billing y luego volver a pedir `/me`.
+Ejemplos parciales de `user` (los demas campos de `MeUser` tambien se devuelven). Prueba gratuita sin compra real:
 ```json
-{ "user": { "is_enabled_functions": true, "premium_expires_at": null } }
+{ "user": { "is_enabled_functions": true, "trial_expires_at": "2026-11-08T12:00:00+00:00", "premium_expires_at": null, "has_active_subscription": false, "auto_renew_enabled": null, "is_premium_grace_period": false, "premium_grace_ends_at": null } }
 ```
-El ejemplo anterior representa una cuenta durante su prueba gratuita sin compra real registrada. Si Premium vencio y tampoco queda prueba gratuita, ambos campos pueden ser:
+Premium vigente sin renovacion automatica:
 ```json
-{ "user": { "is_enabled_functions": false, "premium_expires_at": "2026-10-20T12:00:00+00:00" } }
+{ "user": { "is_enabled_functions": true, "trial_expires_at": "2026-10-01T12:00:00+00:00", "premium_expires_at": "2026-11-24T12:00:00+00:00", "has_active_subscription": true, "auto_renew_enabled": false, "is_premium_grace_period": false, "premium_grace_ends_at": null } }
 ```
-Un `premium_expires_at` no nulo no garantiza acceso actual: puede ser una fecha pasada o corresponder a una compra cuyo estado ya no da acceso. Las compras simuladas `DEMO_CONFIRMED`, otros productos y registros sin vencimiento no reemplazan la ultima fecha real conocida.
+Renovacion pendiente de confirmar, con tolerancia vigente (ejemplo evaluado entre el 24 y el 27 de octubre de 2026 a las 12:00 UTC):
+```json
+{ "user": { "is_enabled_functions": true, "trial_expires_at": "2026-10-01T12:00:00+00:00", "premium_expires_at": "2026-10-24T12:00:00+00:00", "has_active_subscription": false, "auto_renew_enabled": null, "is_premium_grace_period": true, "premium_grace_ends_at": "2026-10-27T12:00:00+00:00" } }
+```
+Un `premium_expires_at` no nulo no garantiza acceso actual ni que el proximo pago este aprobado. Una fecha pasada puede coexistir con acceso por tolerancia o prueba gratuita. Las fechas solo sirven para presentar informacion; no sustituir las banderas del servidor por comparaciones con el reloj del dispositivo. Ver la tabla de estados de billing para los mensajes de cada caso.
 For a child/member, `user` includes the loaded `balance:BalanceRecord|null` relation; for a parent that relation key is absent. The appended `balance_cents` and `balance_display` are always part of the serialized user. `balance.amount` comes from an Eloquent model without a cast, so use `balance_cents` for a JSON integer with a guaranteed type.
 
 GET /api/user
 Auth: bearer token
 Success `200`: serialized `User` object directly (not wrapped in `{user:...}`).
 Incluye `is_enabled_functions:boolean` en la raiz. Este endpoint tambien sigue disponible con acceso vencido.
-No agrega `premium_expires_at`; usar `GET /api/me` y leer `user.premium_expires_at` para obtener el ultimo vencimiento conocido de Premium.
+No agrega ninguno de los seis campos de prueba y suscripcion de `MeUser`; usar `GET /api/me` para las tarjetas de demo, Premium, renovacion y tolerancia.
 
 POST /api/logout
 Auth: bearer token
@@ -174,42 +245,121 @@ Billing / suscripciones Google Play
 Contrato comun:
 - Las dos rutas requieren `Authorization: Bearer <Sanctum token>` y comparten limite de 30 peticiones por minuto (`429` al excederlo). No exigen funciones habilitadas: una cuenta vencida debe poder recuperar su acceso.
 - Si `billing_demo.enabled` es `false` (`GOOGLE_PLAY_DEMO_ENABLED=false`), responden `404`.
-- `account_id` es un identificador opaco de la cuenta autenticada para asociar la compra de Google Play (`obfuscatedExternalAccountId`). No es el UUID `user.billing_account_id` y no deben intercambiarse.
-- El registro usado por `isEnabledFunctions()` es el estado guardado de la compra; `GET /api/me` no consulta Google Play. Las rutas de billing consultan/verifican Google cuando estan en modo real. Aun no hay endpoint de webhooks.
+- `parent` consulta su propia cuenta. `child` y `member` consultan y actualizan la cuenta del titular de su familia, tambien en billing. Si el integrante no tiene titular asociado, billing responde `403` con `message`, sin `code: FUNCTIONS_DISABLED`.
+- `account_id` es el identificador opaco del TITULAR para asociar la compra de Google Play (`obfuscatedExternalAccountId`). Para una misma familia es el mismo aunque consulte un integrante. No es el UUID `user.billing_account_id`: no intercambiarlos ni calcularlo en Flutter; usar el valor devuelto por billing.
+- No hay webhook, RTDN ni aviso directo de Google al backend. La app entrega el comprobante mediante `/verify`; el backend consulta Google para validarlo. El backend no puede descubrir por si solo un token de compra que nunca recibio. El front debe integrar la restauracion de compras de Google Play al volver a la app o tras reinstalarla.
+- Login, registro, `GET /api/user` y `GET /api/me` NO consultan Google. Entrar o jalar para refrescar debe disparar el flujo de billing descrito abajo; actualizar solamente `/me` no sincroniza la suscripcion.
+- Las consultas de la app pueden reutilizar el ultimo estado durante aproximadamente cinco minutos. Jalar para refrescar no fuerza una consulta nueva ni requiere repetir solicitudes hasta ver cambios. Un `200` puede contener datos guardados, incluso si Google no respondio.
 - Ambas respuestas de exito usan la misma forma:
 ```json
 {
   "data": {
-    "account_id": "<identificador opaco de la cuenta>",
+    "account_id": "<identificador opaco del titular>",
     "subscribed": true,
+    "auto_renew_enabled": true,
     "is_enabled_functions": true,
     "product_id": "domus_dummy",
-    "expires_at": "2026-11-20T12:00:00+00:00"
+    "expires_at": "2026-11-24T12:00:00+00:00",
+    "sync_pending": false,
+    "is_premium_grace_period": false,
+    "premium_grace_ends_at": null
   }
 }
 ```
-- Tipos de salida dentro de `data`: `account_id:string`, `subscribed:boolean`, `is_enabled_functions:boolean`, `product_id:string`, `expires_at:string ISO-8601 UTC|null`.
-- `subscribed` indica si la compra consultada/verificada es elegible, esta reconocida y no ha vencido. `is_enabled_functions` es la decision final de acceso de la cuenta/familia, incluida la prueba gratuita. `expires_at` es el vencimiento de la compra devuelta para el usuario autenticado, no el de la prueba gratuita.
-- `data.expires_at` de billing y `user.premium_expires_at` de `/me` son campos distintos. Billing puede devolver `expires_at:null` si Google ya no encuentra la compra, mientras `/me` conserva el ultimo vencimiento real conocido que siga guardado. Billing tambien puede devolver la fecha de una simulacion; `/me` la ignora. Para hijos/integrantes, `/me` usa la compra del titular de la familia, mientras billing consulta la compra del propio usuario autenticado.
-- Con `GOOGLE_PLAY_DEMO_DUMMY_VERIFICATION=true`, una simulacion puede devolver `subscribed:true` pero no otorga Premium real; despues de la prueba gratuita `is_enabled_functions` puede seguir siendo `false`.
+- Los nueve campos de `data` siempre estan presentes. Tipos: `account_id:string`, `subscribed:boolean`, `auto_renew_enabled:boolean|null`, `is_enabled_functions:boolean`, `product_id:string`, `expires_at:ISODateTime`, `sync_pending:boolean`, `is_premium_grace_period:boolean`, `premium_grace_ends_at:ISODateTime`.
+- `subscribed` indica Premium confirmado vigente de la CUENTA, segun lo guardado. En modo real equivale a `user.has_active_subscription` de `/me` para el mismo estado. No describe necesariamente el token enviado en esa peticion: si se envia un comprobante viejo y ya hay una compra valida mas reciente, la respuesta sigue mostrando la compra actual de la cuenta.
+- `is_enabled_functions` es la decision final de acceso: incluye periodo gratuito, Premium y tolerancia. Puede ser `true` con `subscribed:false`.
+- `auto_renew_enabled`, `is_premium_grace_period` y `premium_grace_ends_at` tienen el mismo significado que en `/me`. En tolerancia sin Premium confirmado, `auto_renew_enabled` es `null`, aunque la ultima compra hubiera tenido renovacion activa.
+- `expires_at` es la fecha conocida de la compra actual, NO el fin de la prueba ni de la tolerancia. Si Google deja de encontrar una compra guardada, se marca vencida pero se conserva su fecha anterior; no asumir que `subscribed:false` implica `expires_at:null`.
+- `data.expires_at` y `user.premium_expires_at` son campos distintos: billing muestra la compra actual, que puede ser simulada en el entorno de pruebas; `/me` solo devuelve fechas reales conocidas no reemplazadas. Sin compra/fecha conocida pueden ser `null`.
+- `sync_pending:true` significa que hay una verificacion/reconocimiento pendiente con reintentos automaticos aun habilitados. NO significa compra aprobada, pago rechazado ni que deban bloquearse las funciones. Puede coexistir con Premium vigente, tolerancia o acceso bloqueado.
+- `sync_pending:false` NO demuestra que Google acabe de confirmar el estado. Tambien ocurre sin compra, con datos reutilizados o al agotarse/detenerse los reintentos. `/me` no devuelve este campo. No hay un campo publico con el numero de intentos, el motivo de su detencion o la fecha de la ultima consulta exitosa a Google.
 
 GET /api/billing/demo
 Auth: bearer token (no requiere funciones habilitadas).
 Body: ninguno.
 Success `200`: forma comun de billing descrita arriba.
-- Selecciona la ultima compra guardada del producto configurado para el usuario autenticado. En modo real consulta Google Play y actualiza su estado guardado, reconocimiento, vencimiento y fecha de verificacion.
-- Sin compra guardada devuelve `subscribed:false` y `expires_at:null`, pero calcula normalmente `is_enabled_functions` (puede ser `true` durante la prueba).
-- Si Google informa que la compra ya no existe/vencio, guarda el estado expirado y responde `subscribed:false`, `expires_at:null` y la bandera de acceso recalculada.
-- Errors: `401` token invalido; `403` compra asociada a otra cuenta; `404` billing deshabilitado; `422` producto de compra incorrecto; `429` limite de peticiones; `503` fallo de configuracion/conexion/verificacion con Google Play. Los errores de billing no usan `FUNCTIONS_DISABLED`.
+- Selecciona la compra actual del titular. En modo real intenta actualizar el estado, renovacion, reconocimiento y vencimiento desde Google; respeta el intervalo corto de consultas y los bloqueos de una actualizacion concurrente.
+- Tambien reintenta reconocer una compra ya validada si su reconocimiento anterior fallo. El front no necesita reenviar `/verify` continuamente para que eso avance.
+- Sin compra guardada devuelve `subscribed:false`, `auto_renew_enabled:null`, `expires_at:null`, `sync_pending:false`, `is_premium_grace_period:false` y `premium_grace_ends_at:null`; calcula normalmente `is_enabled_functions` (puede ser `true` durante la prueba). Esto NO prueba que no exista una compra en Google Play: puede faltar restaurar/enviar su token.
+- Si Google devuelve un vencimiento/estado negativo confirmado o deja de encontrar el token, recalcula el acceso sin tolerancia de renovacion para ese estado. La fecha conocida puede conservarse. Si aun hay periodo gratuito, las funciones pueden seguir habilitadas.
+- Si Google falla temporalmente, la respuesta normal sigue siendo `200` con el estado guardado y `sync_pending` segun corresponda. No se borra la compra ni se inventa un nuevo vencimiento. El resultado puede mantener acceso por periodo pagado o tolerancia.
+- Si se detuvieron los reintentos por un fallo temporal, una consulta desde la app puede volver a comprobarlo tras el intervalo de cinco minutos. Si vuelve a fallar, no reinicia el presupuesto automatico ni la tolerancia. Un problema definitivo de asociacion/configuracion puede requerir soporte.
+- Errores HTTP comunes: `401` sesion invalida; `403` integrante sin titular; `404` billing deshabilitado; `429` limite de peticiones. Pueden existir errores de infraestructura `5xx`. Los problemas de Google de una compra ya guardada normalmente se reflejan en el `200` anterior; no esperar siempre un `503`. Los errores de billing no usan `FUNCTIONS_DISABLED`.
 
 POST /api/billing/demo/verify
 Auth: bearer token (no requiere funciones habilitadas).
 Body: `product_id:string` requerido, debe coincidir con `config('billing_demo.product_id')` (actualmente `domus_dummy`); `purchase_token:string` requerido, maximo 4096 caracteres.
+Ejemplo:
+```json
+{ "product_id": "domus_dummy", "purchase_token": "<token recibido de Google Play>" }
+```
 Success `200`: forma comun de billing descrita arriba.
-- En modo real verifica la compra, el producto y que `obfuscatedExternalAccountId` coincida con la cuenta autenticada. Guarda la compra, y si es elegible pero aun no esta reconocida, completa su reconocimiento con Google Play.
-- Una compra vigente verificada permite recuperar acceso inmediatamente: la respuesta recalcula `data.is_enabled_functions` tras guardarla. Un integrante sigue dependiendo de la suscripcion/prueba del padre, no de una compra propia.
-- Un token de compra ya guardado para otra cuenta responde `403`. Repetir una verificacion de la misma cuenta actualiza su registro, sin crear otra suscripcion por el mismo token.
-- Errors: `401` token invalido; `403` compra de otra cuenta; `404` billing deshabilitado; `422` body invalido, comprobante inexistente/vencido, producto incorrecto o compra pendiente; `429` limite de peticiones; `503` fallo de configuracion/conexion/verificacion/reconocimiento con Google Play. Una compra con estado no elegible puede devolver `200` con `subscribed:false`; no interpretar el HTTP `200` como Premium activo.
+- Verifica el producto y que la compra pertenezca al titular de la familia. El `account_id` de billing debe haberse enviado a Google al comprar. No asociar una compra a una cuenta distinta solo porque el SDK la devuelva en el dispositivo.
+- Si Google no proporciona un identificador de cuenta familiar valido, la verificacion tambien puede responder `403`. No eludir esa comprobacion ni prometer que toda compra disponible en el dispositivo se podra asignar al usuario actual; mostrar un problema de asociacion y ofrecer revision/restauracion o soporte.
+- Guarda la compra validada y, si es elegible y falta el reconocimiento, lo solicita a Google. Una compra validada cuyo reconocimiento falla puede responder `200`, `subscribed:false`, `sync_pending:true` e `is_enabled_functions:true` gracias a la tolerancia. No pedirle al usuario que vuelva a pagar por ese resultado.
+- Un token nuevo que no pudo validarse con Google NO recibe tolerancia ni se da por comprado. En ese caso puede responder `503` y el backend puede no haber guardado el token. El front debe conservar la posibilidad de restaurarlo desde Google y reenviarlo despues; no dar por perdida la compra ni iniciarle otro cobro automaticamente.
+- Un token ya guardado para otra cuenta responde `403`. Reenviar el mismo token a la misma cuenta no crea otra suscripcion. Se respetan el intervalo de consulta y los limites de reintentos; la respuesta puede ser un estado guardado.
+- Un comprobante viejo no desplaza la compra vigente. Los tokens que Google identifica como reemplazados se conservan como historico y no vuelven a otorgar acceso.
+- Errores: `401` sesion invalida; `403` otra cuenta o integrante sin titular; `404` billing deshabilitado; `422` body invalido, comprobante inexistente/vencido, producto incorrecto o compra pendiente; `429` limite de peticiones; `503` Google/configuracion no disponible para validar una compra nueva o compra en actualizacion concurrente. Fallos de reconocimiento de una compra ya validada normalmente quedan pendientes y responden `200` con las banderas indicadas.
+- Un estado no elegible tambien puede responder `200` con `subscribed:false`. HTTP `200` significa que se obtuvo una respuesta de estado, NO que hubo un pago nuevo ni que Premium ya esta activo. Incluso tras un error puede haberse actualizado un registro previo; volver a consultar `/me` para reconstruir el estado visible.
+
+Flujo esperado en Flutter: entrada, refresco, compra y restauracion
+1. Guardar el token de login/registro. Su `is_enabled_functions` es una lectura inicial guardada, no una comprobacion nueva con Google. No cerrar sesion ni impedir consultar billing porque sea `false`.
+2. Al entrar con sesion existente o al jalar para refrescar: esperar `GET /api/billing/demo`, aplicar sus campos de `data` y DESPUES esperar `GET /api/me` para completar el usuario y las tarjetas. Evitar lanzar ambas consultas en paralelo y mostrar un `/me` anterior como si fuera el resultado actualizado.
+3. Cuando la integracion con Google Play detecte compras disponibles al abrir/restaurar, enviar sus tokens con `POST /api/billing/demo/verify` y volver a pedir `/me` al terminar. `GET /api/billing/demo` solo conoce lo guardado; no sustituye la restauracion del SDK.
+4. Para comprar: obtener `data.account_id` y `data.product_id`, asociar el primero a la compra en Google Play, ejecutar el flujo del SDK y enviar el token resultante a `/verify`. Si el SDK informa una compra pendiente, mostrar que falta completarla; no considerarla pagada ni volver a cobrarla. Una cancelacion del dialogo de compra tampoco cancela una suscripcion previa.
+5. Tras un `200` de billing, actualizar primero el acceso y despues decidir el mensaje con las banderas. Al recuperarse el acceso, volver a cargar las consultas de pantalla que antes se rechazaron con `FUNCTIONS_DISABLED`. No reenviar automaticamente una escritura de dinero/tareas que fallo: puede requerir confirmar de nuevo la accion del usuario.
+6. Una actualizacion de pantalla es un intento, no un bucle. No sondear cada pocos segundos ni agregar en Flutter una cola de 50 reintentos o un contador de tres dias. El servidor administra la tolerancia y el trabajo automatico.
+7. Si cambia la cuenta autenticada, descartar el estado de suscripcion del usuario anterior. No transferir Premium entre cuentas por conservar un provider o porque ambas usan el mismo dispositivo/Google Play.
+
+Reglas para vistas y mensajes (modo real)
+La primera decision siempre usa `is_enabled_functions`. La tarjeta de suscripcion usa despues las otras banderas. Los siguientes textos son SUGERENCIAS de UI, no campos `message` que devuelva billing.
+
+| Estado recibido | Funciones y vista sugerida |
+| --- | --- |
+| `has_active_subscription:true`, `auto_renew_enabled:true` | Funciones habilitadas. "Premium activo. Renovacion automatica activa." Mostrar `premium_expires_at` como fin del periodo actual, sin prometer que el siguiente cobro ya se completo. |
+| `has_active_subscription:true`, `auto_renew_enabled:false` | Funciones habilitadas hasta el periodo reconocido. "La renovacion automatica esta desactivada. Tu periodo actual termina el {premium_expires_at}." Puede ser una alerta destacada, pero no bloquear hoy ni decir "ya vencio". |
+| `has_active_subscription:true`, `auto_renew_enabled:null` | Funciones habilitadas. Mostrar "Premium activo" y la fecha conocida; no afirmar que la renovacion esta desactivada. |
+| `is_premium_grace_period:true` | Funciones habilitadas aunque `has_active_subscription:false` / `subscribed:false`. "Estamos verificando tu suscripcion. Puedes seguir usando las funciones hasta el {premium_grace_ends_at} mientras se confirma." No afirmar que no pago, no volver a cobrar y no sustituir esa fecha por `premium_expires_at`. |
+| `is_enabled_functions:true`, `has_active_subscription:false`, `is_premium_grace_period:false` | Acceso por periodo gratuito/extension administrativa. La fecha real de una compra puede ser `null` o pasada. Mostrar "Tu demo vence el {trial_expires_at}" usando `user.trial_expires_at` de `GET /api/me`. La fecha respeta las extensiones o reducciones administrativas; no reconstruirla con `created_at + 15` ni sustituirla por `premium_expires_at`. |
+| `is_enabled_functions:false`, `has_active_subscription:false`, `is_premium_grace_period:false` | Bloquear las funciones, conservar la sesion y ofrecer actualizar/restaurar/revisar la suscripcion. "Tu acceso a las funciones no esta activo." La fecha conocida puede ser pasada o `null`; estos campos no identifican por si solos la causa exacta. |
+| `sync_pending:true` junto con cualquier estado anterior | Es informacion adicional sobre la actualizacion. Mantener la vista y acceso que indiquen las otras banderas. Si ya hay Premium vigente, no mostrar un bloqueo solo por este campo. |
+| `sync_pending:false` sin Premium ni tolerancia | No deducir "pago rechazado" ni "verificacion completada". Puede haberse detenido el trabajo automatico. Permitir una actualizacion desde la app y, si sigue sin resolverse, ofrecer soporte/restauracion. |
+
+- En la respuesta de billing, usar `subscribed` donde la tabla dice `has_active_subscription`; en `/me`, usar `user.has_active_subscription`. No buscar un campo en la envoltura del otro endpoint. Para pantallas completas, usar el `/me` obtenido despues del flujo de actualizacion.
+- Para `child`/`member`, mostrar mensajes dirigidos al titular: por ejemplo, "Pide al titular de tu familia que revise la suscripcion". La consulta del integrante SI puede actualizar una compra que el backend ya conoce; no necesita que el padre entre solo para sincronizarla.
+- No hay `subscription_status`, motivo de cancelacion, estado detallado de Google, fecha de proximo cobro confirmada ni motivo exacto de falta de acceso en estos JSON. No inventar esos datos ni distinguir "tarjeta rechazada" de "compra nunca registrada" a partir de una fecha/booleano.
+- Los avisos de renovacion y tolerancia son independientes: `auto_renew_enabled:null` durante tolerancia no es una orden de mostrar "renovacion desactivada".
+
+Tolerancia, errores y casos limite
+- Dias de tolerancia: por defecto `SUBSCRIPTION_GRACE_DAYS=3`; el front no debe fijar ese numero. Renderizar `premium_grace_ends_at` y respetar las banderas que devuelve el servidor. La fecha no se reinicia al entrar, reinstalar, reenviar el mismo comprobante o jalar para refrescar.
+- Compra validada, reconocimiento pendiente: la tolerancia termina en la primera validacion + los dias configurados, o antes si termina la compra. En este caso `premium_expires_at` puede ser FUTURA y `has_active_subscription:false`; la fecha futura sola no significa Premium confirmado.
+- Renovacion aun no comprobada: mientras el ultimo estado era activo/en gracia de Google y no constaba renovacion desactivada, puede haber cobertura hasta el vencimiento pagado conocido + los dias configurados. Una fecha pagada pasada con acceso `true` es un resultado esperado durante esta cobertura.
+- Renovacion desactivada/cancelada: conserva el periodo pagado, pero no recibe dias extra por renovacion despues de ese periodo. Si el reconocimiento inicial aun esta pendiente, una cobertura provisional nunca supera ese vencimiento pagado.
+- Si Google confirma vencimiento, suspension o pausa, o deja de encontrar la compra, se termina la cobertura provisional de ese registro. Esto puede ocurrir antes de la fecha de tolerancia mostrada anteriormente. La prueba gratuita, si sigue vigente, puede mantener `is_enabled_functions:true`.
+- Al llegar EXACTAMENTE al fin de la tolerancia, deja de dar acceso. El siguiente `/me` devuelve `is_premium_grace_period:false` y `premium_grace_ends_at:null`; `is_enabled_functions` solo queda `true` si existe otra causa valida, como una prueba administrativa vigente. El front puede refrescar al llegar a esa hora, pero no concede ni extiende permisos por su cuenta.
+- Fechas: son ISO-8601 con zona UTC; convertirlas a la zona del usuario para mostrarlas, sin quitar el offset antes de parsear. Usar fecha y hora cuando sea importante explicar el corte. Un reloj del telefono adelantado/atrasado no cambia la decision del servidor.
+- Falta de red, timeout o `5xx` sin un JSON util: no convertir los campos ausentes a `false`/`null`, no decir "suscripcion cancelada" y no borrar la sesion. Mantener la ultima informacion visible como no actualizada, mostrar "No pudimos actualizar el estado. Intenta de nuevo" y ofrecer reintentar. Si `/me` sigue disponible, consultarlo para recuperar el acceso guardado. Esto no concede uso offline indefinido ni evita las comprobaciones del backend.
+- Un `200` con datos guardados no garantiza contacto reciente con Google; el backend no expone la fecha de esa consulta. No mostrar "Google acaba de confirmar tu pago" solo porque termino el refresco.
+- `401`: volver al flujo de autenticacion. `403` con `code:FUNCTIONS_DISABLED` en una ruta funcional: actualizar el acceso a `false`, conservar la sesion y mostrar la alerta. Otro `403`: problema de pertenencia/cuenta, no prueba de vencimiento. El `message` de bloqueo es generico y menciona el periodo gratuito aunque tambien pueda haber terminado Premium; usar el codigo para clasificarlo.
+- `404` de billing: compras no disponibles en ese entorno; no implica que el usuario no exista ni que haya cancelado. Seguir usando `/me` para el acceso guardado. `429`: esperar antes de volver a intentar y respetar `Retry-After` cuando venga; no encadenar solicitudes automaticamente.
+- `422` de `/verify`: mostrar el `message`/errores de validacion, consultar el estado actual y permitir restaurar/revisar la compra cuando proceda. No convertir todos los `422` en "pago rechazado": tambien puede ser una compra pendiente o un producto incorrecto.
+- Una compra restaurada puede reemplazar un token anterior. No seleccionar el acceso en Flutter por el ultimo token enviado ni por el orden de las respuestas de Google: usar el resumen final que devuelve Domus. Evitar refrescos simultaneos que permitan a una respuesta vieja sobrescribir el estado nuevo de la pantalla.
+- Billing no devuelve `message` en su `200`: la UI construye el texto usando estos campos y la tabla anterior. No mostrar al usuario final contadores internos, hashes, nombres de estados de Google ni instrucciones de configuracion del servidor.
+
+Trabajo automatico del backend (informativo; Flutter no debe replicarlo)
+- Con el scheduler de Laravel funcionando, el backend revisa las compras conocidas cuando les corresponde: una compra sana en renovacion programa su siguiente comprobacion para el vencimiento conocido; no consulta todas las compras cada cinco minutos durante anos.
+- Ante un incidente, los intervalos actuales son 5, 15, 30, 60, 120 y despues 180 minutos. Se detiene al resolverlo, alcanzar `GOOGLE_PLAY_RETRY_MAX_ATTEMPTS` (50 por defecto) o agotar `GOOGLE_PLAY_RETRY_WINDOW_DAYS` (3 dias por defecto), lo que ocurra primero. Un intento puede incluir consulta y reconocimiento; no equivale necesariamente a una sola llamada HTTP a Google.
+- Los limites se aplican al incidente pendiente y no se reinician porque pase otra vez el scheduler o se abra la app. Una compra/renovacion efectivamente confirmada si permite programar el siguiente periodo real.
+- La ventana de reintentos y la tolerancia son configuraciones independientes. Para un reconocimiento pendiente, ademas se limita el trabajo automatico a tres dias desde la primera validacion, aunque se configure una ventana general mayor. El frontend no debe asumir que ambos plazos siempre terminan juntos.
+- Al detenerse, se conserva la compra y se registra que necesita revision. Una consulta posterior desde la app puede recuperar un fallo temporal con el intervalo corto, pero un fallo nuevo no reactiva el trabajo automatico agotado ni concede otra tolerancia. Algunos problemas definitivos requieren soporte.
+- Ni la tolerancia ni los reintentos sustituyen la entrega/restauracion inicial del token por la app. Sin webhook, un token nuevo nunca enviado no aparece automaticamente en el servidor.
+
+Modo simulado y alcance de las comprobaciones
+- El producto se llama actualmente `domus_dummy`, pero ese nombre NO indica por si solo que la verificacion sea falsa. Con `GOOGLE_PLAY_DEMO_DUMMY_VERIFICATION=false`, se verifica realmente con Google.
+- Con `GOOGLE_PLAY_DEMO_DUMMY_VERIFICATION=true`, el servidor simula una compra y puede responder `subscribed:true`, una fecha futura y `auto_renew_enabled:null`; no otorga Premium real ni tolerancia. Sin prueba gratuita vigente, `is_enabled_functions` puede seguir siendo `false`, y `/me` devuelve `has_active_subscription:false`. No tratar esta combinacion de pruebas como autorizacion para abrir funciones en Flutter.
+- Los flujos anteriores definen lo que el backend soporta y lo que Flutter DEBE llamar. El login o el gesto de refrescar de la app no estan implementados por este archivo; verificar que el frontend conecte efectivamente esas acciones con billing y la restauracion del SDK.
 
 GET /api/notifications
 Auth: bearer token

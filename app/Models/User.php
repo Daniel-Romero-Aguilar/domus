@@ -95,8 +95,8 @@ class User extends Authenticatable
     public function currentSubscription(): HasOne
     {
         return $this->hasOne(BillingSubscription::class)->ofMany(
-            ['verified_at' => 'max', 'id' => 'max'],
-            fn (Builder $query) => $query->where('product_id', config('billing_demo.product_id')),
+            ['expires_at' => 'max', 'verified_at' => 'max', 'id' => 'max'],
+            fn (Builder $query) => $query->where('product_id', config('billing_demo.product_id'))->whereNull('superseded_at'),
         );
     }
 
@@ -126,13 +126,42 @@ class User extends Authenticatable
 
         return $account !== null && (
             ($account->trialExpiresAt()?->isFuture() ?? false)
-            || ($account->currentSubscription?->isPremium() ?? false)
+            || ($account->currentSubscription?->allowsAccess() ?? false)
         );
     }
 
     public function getIsEnabledFunctionsAttribute(): bool
     {
         return $this->isEnabledFunctions();
+    }
+
+    public function getTrialExpiresAtAttribute(): ?string
+    {
+        return $this->accessAccount()?->trialExpiresAt()?->toIso8601String();
+    }
+
+    public function getHasActiveSubscriptionAttribute(): bool
+    {
+        return $this->accessAccount()?->currentSubscription?->isPremium() ?? false;
+    }
+
+    public function getAutoRenewEnabledAttribute(): ?bool
+    {
+        $subscription = $this->accessAccount()?->currentSubscription;
+
+        return $subscription?->isPremium() ? $subscription->auto_renew_enabled : null;
+    }
+
+    public function getIsPremiumGracePeriodAttribute(): bool
+    {
+        return $this->accessAccount()?->currentSubscription?->isInGracePeriod() ?? false;
+    }
+
+    public function getPremiumGraceEndsAtAttribute(): ?string
+    {
+        $subscription = $this->accessAccount()?->currentSubscription;
+
+        return $subscription?->isInGracePeriod() ? $subscription->graceExpiresAt()->toIso8601String() : null;
     }
 
     public function getPremiumExpiresAtAttribute(): ?string
@@ -147,7 +176,9 @@ class User extends Authenticatable
             ->where('user_id', $account->getKey())
             ->where('product_id', config('billing_demo.product_id'))
             ->where('google_state', '!=', 'DEMO_CONFIRMED')
+            ->whereNull('superseded_at')
             ->whereNotNull('expires_at')
+            ->orderByDesc('expires_at')
             ->orderByDesc('verified_at')
             ->orderByDesc('id')
             ->first();

@@ -76,7 +76,11 @@ class AdminSubscriptionsTest extends TestCase
         $play = Mockery::mock(GooglePlayDemoClient::class);
         $play->shouldReceive('lookup')->once()->with('purchase-token-real')->andReturn([
             'externalAccountIdentifiers' => ['obfuscatedExternalAccountId' => $owner],
-            'lineItems' => [['productId' => 'domus_dummy', 'expiryTime' => '2026-11-18T09:00:00Z']],
+            'lineItems' => [[
+                'productId' => 'domus_dummy',
+                'expiryTime' => '2026-11-18T09:00:00Z',
+                'autoRenewingPlan' => ['autoRenewEnabled' => true],
+            ]],
             'subscriptionState' => 'SUBSCRIPTION_STATE_ACTIVE',
             'acknowledgementState' => 'ACKNOWLEDGEMENT_STATE_PENDING',
         ]);
@@ -87,13 +91,19 @@ class AdminSubscriptionsTest extends TestCase
         $this->postJson('/api/billing/demo/verify', [
             'product_id' => 'domus_dummy',
             'purchase_token' => 'purchase-token-real',
-        ])->assertOk()->assertJsonPath('data.subscribed', true);
+        ])->assertOk()->assertJsonPath('data.subscribed', true)
+            ->assertJsonPath('data.auto_renew_enabled', true);
+
+        $this->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.has_active_subscription', true)
+            ->assertJsonPath('user.auto_renew_enabled', true);
 
         $this->assertDatabaseHas('billing_demo_subscriptions', [
             'user_id' => $user->id,
             'product_id' => 'domus_dummy',
             'google_state' => 'SUBSCRIPTION_STATE_ACTIVE',
             'acknowledged' => true,
+            'auto_renew_enabled' => true,
             'expires_at' => '2026-11-18 09:00:00',
         ]);
     }
@@ -107,6 +117,7 @@ class AdminSubscriptionsTest extends TestCase
         $this->subscription($user, 'SUBSCRIPTION_STATE_ACTIVE', true, '2026-10-18 06:06:00');
         DB::table('billing_demo_subscriptions')->where('user_id', $user->id)->update([
             'purchase_token' => Crypt::encryptString('purchase-token-'.$user->id),
+            'auto_renew_enabled' => false,
         ]);
 
         Carbon::setTestNow('2026-10-18 06:24:00');
@@ -114,7 +125,11 @@ class AdminSubscriptionsTest extends TestCase
         $play = Mockery::mock(GooglePlayDemoClient::class);
         $play->shouldReceive('lookup')->once()->with('purchase-token-'.$user->id)->andReturn([
             'externalAccountIdentifiers' => ['obfuscatedExternalAccountId' => $owner],
-            'lineItems' => [['productId' => 'domus_dummy', 'expiryTime' => '2026-10-18T06:31:00Z']],
+            'lineItems' => [[
+                'productId' => 'domus_dummy',
+                'expiryTime' => '2026-10-18T06:31:00Z',
+                'autoRenewingPlan' => ['autoRenewEnabled' => true],
+            ]],
             'subscriptionState' => 'SUBSCRIPTION_STATE_ACTIVE',
             'acknowledgementState' => 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
         ]);
@@ -124,12 +139,14 @@ class AdminSubscriptionsTest extends TestCase
         $this->getJson('/api/billing/demo')
             ->assertOk()
             ->assertJsonPath('data.subscribed', true)
+            ->assertJsonPath('data.auto_renew_enabled', true)
             ->assertJsonPath('data.expires_at', '2026-10-18T06:31:00+00:00');
 
         $this->assertDatabaseHas('billing_demo_subscriptions', [
             'user_id' => $user->id,
             'expires_at' => '2026-10-18 06:31:00',
             'verified_at' => '2026-10-18 06:24:00',
+            'auto_renew_enabled' => true,
         ]);
 
         $admin = Admin::query()->create([
@@ -143,6 +160,81 @@ class AdminSubscriptionsTest extends TestCase
             ->assertSee('Vence 18/10/2026 06:31 UTC')
             ->assertSee('Verificado 18/10/2026 06:24 UTC')
             ->assertSee('Suscrito');
+    }
+
+    public function test_refreshing_a_canceled_purchase_disables_renewal_and_keeps_access_until_expiry(): void
+    {
+        $this->travelTo(now('UTC')->setDate(2026, 10, 23)->setTime(12, 0));
+        config()->set('billing_demo.enabled', true);
+        config()->set('billing_demo.dummy_verification', false);
+        $user = User::factory()->create(['created_at' => now()->subDays(30)]);
+        $this->subscription($user, 'SUBSCRIPTION_STATE_ACTIVE', true, '2026-11-18 09:00:00');
+        DB::table('billing_demo_subscriptions')->where('user_id', $user->id)->update([
+            'purchase_token' => Crypt::encryptString('renewal-token'),
+            'auto_renew_enabled' => true,
+        ]);
+
+        $owner = hash_hmac('sha256', 'subscription-demo:'.$user->id, config('app.key'));
+        $play = Mockery::mock(GooglePlayDemoClient::class);
+        $play->shouldReceive('lookup')->once()->with('renewal-token')->andReturn([
+            'externalAccountIdentifiers' => ['obfuscatedExternalAccountId' => $owner],
+            'lineItems' => [[
+                'productId' => 'domus_dummy',
+                'expiryTime' => '2026-11-18T09:00:00Z',
+                'autoRenewingPlan' => ['autoRenewEnabled' => false],
+            ]],
+            'subscriptionState' => 'SUBSCRIPTION_STATE_CANCELED',
+            'acknowledgementState' => 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED',
+        ]);
+        $this->app->instance(GooglePlayDemoClient::class, $play);
+
+        Sanctum::actingAs($user);
+        $this->getJson('/api/billing/demo')->assertOk()
+            ->assertJsonPath('data.subscribed', true)
+            ->assertJsonPath('data.auto_renew_enabled', false);
+        $this->assertDatabaseHas('billing_demo_subscriptions', [
+            'user_id' => $user->id,
+            'google_state' => 'SUBSCRIPTION_STATE_CANCELED',
+            'auto_renew_enabled' => false,
+        ]);
+        $this->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.has_active_subscription', true)
+            ->assertJsonPath('user.auto_renew_enabled', false)
+            ->assertJsonPath('user.is_enabled_functions', true);
+
+        $this->travelTo(now('UTC')->setDate(2026, 11, 18)->setTime(9, 0));
+        $this->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.has_active_subscription', false)
+            ->assertJsonPath('user.auto_renew_enabled', null)
+            ->assertJsonPath('user.is_enabled_functions', false)
+            ->assertJsonPath('user.premium_expires_at', '2026-11-18T09:00:00+00:00');
+    }
+
+    public function test_a_purchase_no_longer_found_in_google_clears_renewal(): void
+    {
+        config()->set('billing_demo.enabled', true);
+        config()->set('billing_demo.dummy_verification', false);
+        $user = User::factory()->create();
+        $this->subscription($user, 'SUBSCRIPTION_STATE_ACTIVE', true, now()->addMonth()->toDateTimeString());
+        DB::table('billing_demo_subscriptions')->where('user_id', $user->id)->update([
+            'purchase_token' => Crypt::encryptString('missing-token'),
+            'auto_renew_enabled' => true,
+        ]);
+        $play = Mockery::mock(GooglePlayDemoClient::class);
+        $play->shouldReceive('lookup')->once()->with('missing-token')->andReturnNull();
+        $this->app->instance(GooglePlayDemoClient::class, $play);
+
+        Sanctum::actingAs($user);
+        $this->getJson('/api/billing/demo')->assertOk()
+            ->assertJsonPath('data.subscribed', false)
+            ->assertJsonPath('data.auto_renew_enabled', null);
+        $this->assertDatabaseHas('billing_demo_subscriptions', [
+            'user_id' => $user->id,
+            'auto_renew_enabled' => null,
+        ]);
+        $this->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.has_active_subscription', false)
+            ->assertJsonPath('user.auto_renew_enabled', null);
     }
 
     public function test_livewire_filters_all_users_before_paginating_and_resets_the_page(): void

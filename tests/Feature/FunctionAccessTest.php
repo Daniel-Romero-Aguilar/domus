@@ -24,6 +24,7 @@ class FunctionAccessTest extends TestCase
         parent::setUp();
         $this->travelTo(now('UTC')->setDate(2026, 10, 20)->setTime(12, 0));
         config()->set('access.trial_days', 15);
+        config()->set('access.subscription_grace_days', 0);
     }
 
     public function test_trial_uses_registration_date_and_expires_at_the_exact_boundary(): void
@@ -138,6 +139,7 @@ class FunctionAccessTest extends TestCase
             'password_confirmation' => 'password123',
             'terms_accepted' => true,
             'trial_ends_at' => '2099-01-01 00:00:00',
+            'trial_expires_at' => '2099-01-01T00:00:00+00:00',
             'is_enabled_functions' => false,
         ])->assertCreated()->assertJsonPath('user.is_enabled_functions', true);
 
@@ -146,9 +148,12 @@ class FunctionAccessTest extends TestCase
         $this->assertSame('2026-11-04 12:00:00', $user->trialExpiresAt()->toDateTimeString());
         $this->postJson('/api/login', ['login' => $user->email, 'password' => 'password123'])
             ->assertOk()->assertJsonPath('user.is_enabled_functions', true);
-        $this->actingAs($user, 'sanctum')->getJson('/api/me')
-            ->assertOk()->assertJsonPath('user.is_enabled_functions', true);
-        $this->getJson('/api/user')->assertOk()->assertJsonPath('is_enabled_functions', true);
+        $this->actingAs($user, 'sanctum')->getJson('/api/user')
+            ->assertOk()->assertJsonPath('is_enabled_functions', true)
+            ->assertJsonMissingPath('trial_expires_at');
+        $this->getJson('/api/me')
+            ->assertOk()->assertJsonPath('user.is_enabled_functions', true)
+            ->assertJsonPath('user.trial_expires_at', '2026-11-04T12:00:00+00:00');
 
         $user->created_at = now()->subDays(30);
         $user->save();
@@ -158,12 +163,67 @@ class FunctionAccessTest extends TestCase
             ->assertJsonMissingPath('user.current_subscription')->assertJsonMissingPath('user.trial_ends_at');
     }
 
+    public function test_me_returns_the_effective_trial_expiration_with_the_configured_duration(): void
+    {
+        $user = User::factory()->create(['created_at' => now()->subDays(8)]);
+
+        $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.trial_expires_at', '2026-10-27T12:00:00+00:00')
+            ->assertJsonPath('user.premium_expires_at', null)
+            ->assertJsonPath('user.is_enabled_functions', true)
+            ->assertJsonMissingPath('user.trial_ends_at');
+
+        config()->set('access.trial_days', 8);
+        $this->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.trial_expires_at', '2026-10-20T12:00:00+00:00')
+            ->assertJsonPath('user.is_enabled_functions', false);
+
+        $this->travel(1)->days();
+        $this->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.trial_expires_at', '2026-10-20T12:00:00+00:00')
+            ->assertJsonPath('user.is_enabled_functions', false);
+    }
+
+    public function test_me_uses_the_family_owners_effective_trial_expiration(): void
+    {
+        $parent = User::factory()->create(['created_at' => now()->subDays(5)]);
+        foreach (['child', 'member'] as $role) {
+            $user = User::factory()->create(['role' => $role, 'trial_ends_at' => now()->addYear()]);
+            FamilyMember::create(['parent_user_id' => $parent->id, 'user_id' => $user->id]);
+
+            $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
+                ->assertJsonPath('user.trial_expires_at', '2026-10-30T12:00:00+00:00')
+                ->assertJsonPath('user.is_enabled_functions', true);
+
+            $parent->forceFill(['trial_ends_at' => '2026-10-19 12:00:00'])->save();
+            $this->getJson('/api/me')->assertOk()
+                ->assertJsonPath('user.trial_expires_at', '2026-10-19T12:00:00+00:00')
+                ->assertJsonPath('user.is_enabled_functions', false);
+
+            $parent->forceFill(['trial_ends_at' => null])->save();
+        }
+    }
+
+    public function test_me_returns_null_trial_expiration_for_family_members_without_an_owner(): void
+    {
+        foreach (['child', 'member'] as $role) {
+            $user = User::factory()->create(['role' => $role, 'trial_ends_at' => now()->addYear()]);
+
+            $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
+                ->assertJsonStructure(['user' => ['trial_expires_at']])
+                ->assertJsonPath('user.trial_expires_at', null)
+                ->assertJsonPath('user.is_enabled_functions', false);
+        }
+    }
+
     public function test_me_returns_null_premium_expiration_without_a_real_purchase(): void
     {
         $user = User::factory()->create();
         $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
             ->assertJsonStructure(['user' => ['premium_expires_at']])
             ->assertJsonPath('user.premium_expires_at', null)
+            ->assertJsonPath('user.has_active_subscription', false)
+            ->assertJsonPath('user.auto_renew_enabled', null)
             ->assertJsonPath('user.is_enabled_functions', true);
 
         $user->created_at = now()->subDays(30);
@@ -171,7 +231,20 @@ class FunctionAccessTest extends TestCase
         $this->subscription($user, 'DEMO_CONFIRMED');
         $this->actingAs($user->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
             ->assertJsonPath('user.premium_expires_at', null)
+            ->assertJsonPath('user.has_active_subscription', false)
+            ->assertJsonPath('user.auto_renew_enabled', null)
             ->assertJsonPath('user.is_enabled_functions', false);
+    }
+
+    public function test_me_does_not_assume_renewal_for_a_purchase_without_a_saved_flag(): void
+    {
+        $user = User::factory()->create(['created_at' => now()->subDays(30)]);
+        $this->subscription($user);
+
+        $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.has_active_subscription', true)
+            ->assertJsonPath('user.auto_renew_enabled', null)
+            ->assertJsonPath('user.is_enabled_functions', true);
     }
 
     public function test_me_keeps_premium_expiration_after_cancellation_and_expiry(): void
@@ -221,26 +294,30 @@ class FunctionAccessTest extends TestCase
         DB::table('billing_demo_subscriptions')->where('id', $first)
             ->update(['verified_at' => now()->addSecond()]);
         $this->actingAs($user->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
-            ->assertJsonPath('user.premium_expires_at', '2026-11-20T12:00:00+00:00');
+            ->assertJsonPath('user.premium_expires_at', '2026-12-20T12:00:00+00:00');
     }
 
     public function test_me_uses_the_family_owners_premium_expiration(): void
     {
         $parent = User::factory()->create();
-        $this->subscription($parent);
+        $this->subscription($parent, autoRenewEnabled: false);
         foreach (['child', 'member'] as $role) {
             $user = User::factory()->create(['role' => $role]);
             FamilyMember::create(['parent_user_id' => $parent->id, 'user_id' => $user->id]);
-            $this->subscription($user, expiresAt: '2026-12-20 12:00:00');
+            $this->subscription($user, expiresAt: '2026-12-20 12:00:00', autoRenewEnabled: true);
             $this->actingAs($user, 'sanctum')->getJson('/api/me')->assertOk()
-                ->assertJsonPath('user.premium_expires_at', '2026-11-20T12:00:00+00:00');
+                ->assertJsonPath('user.premium_expires_at', '2026-11-20T12:00:00+00:00')
+                ->assertJsonPath('user.has_active_subscription', true)
+                ->assertJsonPath('user.auto_renew_enabled', false);
         }
 
         $orphan = User::factory()->create(['role' => 'child']);
         $this->subscription($orphan);
         $this->actingAs($orphan, 'sanctum')->getJson('/api/me')->assertOk()
             ->assertJsonStructure(['user' => ['premium_expires_at']])
-            ->assertJsonPath('user.premium_expires_at', null);
+            ->assertJsonPath('user.premium_expires_at', null)
+            ->assertJsonPath('user.has_active_subscription', false)
+            ->assertJsonPath('user.auto_renew_enabled', null);
     }
 
     public function test_expired_access_blocks_reads_and_writes_but_keeps_auth_and_billing_available(): void
@@ -330,10 +407,16 @@ class FunctionAccessTest extends TestCase
 
         $this->assertTrue($free->fresh()->isEnabledFunctions());
         $this->assertSame($createdAt, $free->fresh()->created_at->toDateTimeString());
+        $this->actingAs($free->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.trial_expires_at', '2026-11-01T12:34:00+00:00')
+            ->assertJsonPath('user.is_enabled_functions', true);
         $component->call('editTrial', $free->id)
             ->set('trialEndsAt', '2026-10-20T11:59:59')->call('saveTrial')->assertHasNoErrors()
             ->assertSee('Funciones bloqueadas');
         $this->assertFalse($free->fresh()->isEnabledFunctions());
+        $this->actingAs($free->fresh(), 'sanctum')->getJson('/api/me')->assertOk()
+            ->assertJsonPath('user.trial_expires_at', '2026-10-20T11:59:59+00:00')
+            ->assertJsonPath('user.is_enabled_functions', false);
     }
 
     public function test_admin_date_validation_and_cancel_do_not_change_access(): void
@@ -365,6 +448,7 @@ class FunctionAccessTest extends TestCase
     private function subscription(
         User $user, string $state = 'SUBSCRIPTION_STATE_ACTIVE', ?bool $acknowledged = true,
         string $expiresAt = '2026-11-20 12:00:00',
+        ?bool $autoRenewEnabled = null,
     ): int {
         return DB::table('billing_demo_subscriptions')->insertGetId([
             'user_id' => $user->id,
@@ -373,6 +457,7 @@ class FunctionAccessTest extends TestCase
             'product_id' => config('billing_demo.product_id'),
             'google_state' => $state,
             'acknowledged' => $acknowledged,
+            'auto_renew_enabled' => $autoRenewEnabled,
             'expires_at' => $expiresAt,
             'verified_at' => now(),
             'created_at' => now(),
